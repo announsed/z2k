@@ -89,8 +89,8 @@ create_default_strategy_files() {
 # ==============================================================================
 
 # Генерация strategies.conf из strats_new2.txt
-# Формат входа: curl_test_http[s] ipv4 rutracker.org : nfqws2 <параметры>
-# Формат выхода: [NUMBER]|[TYPE]|[PARAMETERS]
+# Формат входа: test_name ipv4 domain : nfqws2 <параметры>
+# Формат выхода: [NUMBER]|[TYPE]|[PARAMETERS]|[NAME]
 generate_strategies_conf() {
     local input_file=$1
     local output_file=$2
@@ -106,7 +106,7 @@ generate_strategies_conf() {
     cat > "$output_file" <<'EOF'
 # Zapret2 Strategies Database
 # Сгенерировано из blockcheck2 output
-# Формат: [NUMBER]|[TYPE]|[PARAMETERS]
+# Формат: [NUMBER]|[TYPE]|[PARAMETERS]|[NAME]
 EOF
 
     local num=1
@@ -127,6 +127,10 @@ EOF
         local type="https"
         https_count=$((https_count + 1))
 
+        # Извлечь имя стратегии (первое слово test_cmd)
+        local name
+        name=$(echo "$test_cmd" | awk '{print $1}')
+
         # Извлечь nfqws2 параметры (удалить " nfqws2 " в начале)
         local params
         params=$(echo "$nfqws_params" | sed 's/^ *nfqws2 *//' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
@@ -134,8 +138,8 @@ EOF
         # Пропустить если параметры пустые
         [ -z "$params" ] && continue
 
-        # Записать в strategies.conf
-        echo "${num}|${type}|${params}" >> "$output_file"
+        # Записать в strategies.conf с именем
+        echo "${num}|${type}|${params}|${name}" >> "$output_file"
 
         num=$((num + 1))
     done
@@ -177,6 +181,31 @@ get_strategy_type() {
     fi
 
     grep "^${num}|" "$conf" | cut -d'|' -f2
+}
+
+# Найти номер стратегии по имени (поле 4 в strategies.conf)
+# Возвращает первый найденный номер или пустую строку
+find_strategy_by_name() {
+    local name=$1
+    local conf="${STRATEGIES_CONF:-${CONFIG_DIR}/strategies.conf}"
+
+    if [ ! -f "$conf" ]; then
+        return 1
+    fi
+
+    grep "|${name}$" "$conf" | head -n 1 | cut -d'|' -f1
+}
+
+# Найти номер QUIC стратегии по имени (поле 2 в quic_strategies.conf)
+find_quic_strategy_by_name() {
+    local name=$1
+    local conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR}/quic_strategies.conf}"
+
+    if [ ! -f "$conf" ]; then
+        return 1
+    fi
+
+    grep "|${name}|" "$conf" | head -n 1 | cut -d'|' -f1
 }
 
 # Получить QUIC стратегию по номеру
@@ -441,6 +470,24 @@ build_tls_profile_params() {
     fi
     if ! params_has_payload "$params"; then
         payload="--payload=tls_client_hello"
+    fi
+
+    printf "%s %s %s" "$prefix" "$payload" "$params"
+}
+
+build_http_profile_params() {
+    local params=$1
+    local prefix=""
+    local payload=""
+
+    if ! params_has_filter_tcp "$params"; then
+        prefix="--filter-tcp=80"
+    fi
+    if ! params_has_filter_l7 "$params"; then
+        prefix="${prefix} --filter-l7=http"
+    fi
+    if ! params_has_payload "$params"; then
+        payload="--payload=http_req"
     fi
 
     printf "%s %s %s" "$prefix" "$payload" "$params"
@@ -1852,6 +1899,7 @@ apply_new_default_strategies() {
 }
 
 # Применить autocircular стратегии (автоперебор внутри профиля)
+# Динамически находит стратегии с circular оркестратором по имени в базе
 apply_autocircular_strategies() {
     local auto_mode=0
 
@@ -1859,17 +1907,82 @@ apply_autocircular_strategies() {
         auto_mode=1
     fi
 
-    local yt_tcp=10
-    local yt_gv=11
-    local rkn=12
-    local quic=7
-
     print_header "Применение autocircular стратегий"
-    print_info "Будут применены следующие стратегии:"
-    print_info "  YouTube TCP: #$yt_tcp"
-    print_info "  YouTube GV:  #$yt_gv"
-    print_info "  RKN:         #$rkn"
-    print_info "  YouTube QUIC: #$quic"
+
+    # Динамический поиск autocircular стратегий по имени
+    local yt_tcp
+    yt_tcp=$(find_strategy_by_name "manual_autocircular_yt")
+    if [ -z "$yt_tcp" ]; then
+        print_warning "Autocircular стратегия для YouTube TCP не найдена в базе, используется #1"
+        yt_tcp=1
+    fi
+
+    local yt_gv
+    yt_gv=$(find_strategy_by_name "manual_autocircular_gv")
+    if [ -z "$yt_gv" ]; then
+        print_warning "Autocircular стратегия для YouTube GV не найдена в базе, используется #1"
+        yt_gv=1
+    fi
+
+    local rkn
+    rkn=$(find_strategy_by_name "manual_autocircular_rkn")
+    if [ -z "$rkn" ]; then
+        print_warning "Autocircular стратегия для RKN не найдена в базе, используется #1"
+        rkn=1
+    fi
+
+    local quic
+    quic=$(find_quic_strategy_by_name "yt_quic_autocircular")
+    if [ -z "$quic" ]; then
+        print_warning "Autocircular QUIC стратегия не найдена в базе, используется #1"
+        quic=1
+    fi
+
+    # Проверить что найденные стратегии содержат circular оркестратор
+    local yt_tcp_params
+    yt_tcp_params=$(get_strategy "$yt_tcp")
+    if [ -n "$yt_tcp_params" ]; then
+        case "$yt_tcp_params" in
+            *"--lua-desync=circular:"*)
+                print_info "  YouTube TCP: #$yt_tcp (circular, $(echo "$yt_tcp_params" | grep -o 'strategy=[0-9]*' | wc -l) вариантов)" ;;
+            *)
+                print_info "  YouTube TCP: #$yt_tcp (без circular оркестратора)" ;;
+        esac
+    fi
+
+    local yt_gv_params
+    yt_gv_params=$(get_strategy "$yt_gv")
+    if [ -n "$yt_gv_params" ]; then
+        case "$yt_gv_params" in
+            *"--lua-desync=circular:"*)
+                print_info "  YouTube GV:  #$yt_gv (circular, $(echo "$yt_gv_params" | grep -o 'strategy=[0-9]*' | wc -l) вариантов)" ;;
+            *)
+                print_info "  YouTube GV:  #$yt_gv (без circular оркестратора)" ;;
+        esac
+    fi
+
+    local rkn_params
+    rkn_params=$(get_strategy "$rkn")
+    if [ -n "$rkn_params" ]; then
+        case "$rkn_params" in
+            *"--lua-desync=circular:"*)
+                print_info "  RKN:         #$rkn (circular, $(echo "$rkn_params" | grep -o 'strategy=[0-9]*' | wc -l) вариантов)" ;;
+            *)
+                print_info "  RKN:         #$rkn (без circular оркестратора)" ;;
+        esac
+    fi
+
+    local quic_params
+    quic_params=$(get_quic_strategy "$quic" 2>/dev/null)
+    if [ -n "$quic_params" ]; then
+        case "$quic_params" in
+            *"--lua-desync=circular:"*)
+                print_info "  YouTube QUIC: #$quic (circular, $(echo "$quic_params" | grep -o 'strategy=[0-9]*' | wc -l) вариантов)" ;;
+            *)
+                print_info "  YouTube QUIC: #$quic (без circular оркестратора)" ;;
+        esac
+    fi
+
     printf "\n"
 
     if [ "$auto_mode" -eq 0 ]; then
@@ -1877,19 +1990,6 @@ apply_autocircular_strategies() {
             print_info "Отменено"
             return 0
         fi
-    fi
-
-    if ! strategy_exists "$yt_tcp"; then
-        print_warning "Стратегия #$yt_tcp не найдена, используется #1"
-        yt_tcp=1
-    fi
-    if ! strategy_exists "$yt_gv"; then
-        print_warning "Стратегия #$yt_gv не найдена, используется #1"
-        yt_gv=1
-    fi
-    if ! strategy_exists "$rkn"; then
-        print_warning "Стратегия #$rkn не найдена, используется #1"
-        rkn=1
     fi
 
     apply_category_strategies_v2 "$yt_tcp" "$yt_gv" "$rkn"

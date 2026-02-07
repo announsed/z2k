@@ -197,20 +197,31 @@ download_fake_blobs() {
     local fake_dir="${WORK_DIR}/files/fake"
     mkdir -p "$fake_dir" || die "Не удалось создать $fake_dir"
 
-    local files="
-tls_clienthello_max_ru.bin
-"
+    # Blob-файлы, используемые в стратегиях:
+    # - tls_clienthello_max_ru.bin: autocircular TCP стратегии (blob=tls_max_ru)
+    # - tls_clienthello_14.bin: Discord TCP стратегия (blob=tls_clienthello_14)
+    # - quic_5.bin: QUIC autocircular стратегии (blob=quic5)
+    # - quic_initial_rutracker_org.bin: RuTracker QUIC (blob=quic_rutracker)
+    local fail_flag="${fake_dir}/.download_failed"
+    rm -f "$fail_flag"
 
-    echo "$files" | while read -r file; do
-        [ -z "$file" ] && continue
+    for file in tls_clienthello_max_ru.bin tls_clienthello_14.bin quic_5.bin quic_initial_rutracker_org.bin; do
         local url="${GITHUB_RAW}/files/fake/${file}"
         local output="${fake_dir}/${file}"
         if curl -fsSL "$url" -o "$output"; then
             print_success "Загружено: files/fake/${file}"
         else
-            die "Ошибка загрузки files/fake/${file}"
+            print_error "Ошибка загрузки files/fake/${file}"
+            touch "$fail_flag"
         fi
     done
+
+    if [ -f "$fail_flag" ]; then
+        rm -f "$fail_flag"
+        print_warning "Некоторые blob-файлы не загружены, стратегии могут работать некорректно"
+    else
+        print_success "Все fake blobs загружены"
+    fi
 }
 
 download_init_script() {
@@ -266,8 +277,7 @@ show_welcome() {
 |                   Версия 2.0.0                    |
 +===================================================+
 
-  [WARN]  ВНИМАНИЕ: Проект в активной разработке!
-  [WARN]  Это пре-альфа версия - НЕ используйте в production!
+  [WARN]  ВНИМАНИЕ: Проект в активной разработке (ALPHA TEST)
 
   GitHub: https://github.com/necronicle/z2k
 
