@@ -18,7 +18,6 @@ generate_nfqws2_opt_from_strategies() {
     local youtube_gv_tcp=""
     local rkn_tcp=""
     local quic_udp=""
-    local quic_rkn_udp=""
     local discord_tcp=""
     local discord_udp=""
     local custom_tcp=""
@@ -40,10 +39,6 @@ generate_nfqws2_opt_from_strategies() {
         quic_udp=$(cat "${extra_strats_dir}/UDP/YT/Strategy.txt")
     fi
 
-    if [ -f "${extra_strats_dir}/UDP/RUTRACKER/Strategy.txt" ]; then
-        quic_rkn_udp=$(cat "${extra_strats_dir}/UDP/RUTRACKER/Strategy.txt")
-    fi
-
     # Discord стратегии (обычно фиксированные)
     discord_tcp="--filter-tcp=443 --filter-l7=tls --payload=tls_client_hello --lua-desync=fake:blob=tls_clienthello_14:tls_mod=rnd,dupsid:ip_autottl=-2,3-20 --lua-desync=multisplit:pos=sld+1"
     discord_udp="--filter-udp=50000-50099,1400,3478-3481,5349 --filter-l7=discord,stun --payload=stun,discord_ip_discovery --out-range=-n10 --lua-desync=fake:blob=0x00000000000000000000000000000000:repeats=2"
@@ -56,7 +51,6 @@ generate_nfqws2_opt_from_strategies() {
     [ -z "$youtube_gv_tcp" ] && youtube_gv_tcp="$default_strategy"
     [ -z "$rkn_tcp" ] && rkn_tcp="$default_strategy"
     [ -z "$quic_udp" ] && quic_udp="--filter-udp=443 --filter-l7=quic --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
-    [ -z "$quic_rkn_udp" ] && quic_rkn_udp="--filter-udp=443 --filter-l7=quic --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
     custom_tcp="$default_strategy"
 
     local nfqws2_opt_lines=""
@@ -83,9 +77,6 @@ generate_nfqws2_opt_from_strategies() {
 
     # QUIC YT
     add_hostlist_line "${extra_strats_dir}/UDP/YT/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/UDP/YT/List.txt $quic_udp <HOSTLIST_NOAUTO> --new"
-
-    # QUIC RUTRACKER (disabled)
-    : # disabled by default
 
     # Discord TCP/UDP
     add_hostlist_line "${lists_dir}/discord.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${lists_dir}/discord.txt $discord_tcp <HOSTLIST> --new"

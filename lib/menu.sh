@@ -52,10 +52,6 @@ MENU
                 fi
             fi
 
-            # Статус QUIC RuTracker
-            if is_rutracker_quic_enabled; then
-                printf " RuTracker QUIC: Включен\n"
-            fi
         fi
 
         cat <<'MENU'
@@ -191,7 +187,6 @@ menu_select_strategy() {
     printf "  YouTube GV:  #%s\n" "$current_yt_gv"
     printf "  RKN:         #%s\n" "$current_rkn"
     printf "  QUIC YouTube:    #%s\n" "$(get_current_quic_strategy)"
-    printf "  QUIC RuTracker:  #%s\n" "$(get_rutracker_quic_strategy)"
     print_separator
 
     # Подменю выбора категории
@@ -203,7 +198,6 @@ menu_select_strategy() {
 [3] RKN (заблокированные сайты)
 [4] QUIC (UDP 443)
 [5] Все категории сразу
-[6] Уровень агрессивности (soft/medium/aggressive)
 [B] Назад
 
 SUBMENU
@@ -308,24 +302,6 @@ SUBMENU
         5)
             # Все категории
             menu_select_all_strategies "$total_count"
-            pause
-            return
-            ;;
-        6)
-            print_separator
-            print_info "Выберите уровень агрессивности:"
-            printf "  [1] Мягкий (soft)     -> TCP #1/#4/#7, QUIC #1\n"
-            printf "  [2] Средний (medium)  -> TCP #2/#5/#8, QUIC #2\n"
-            printf "  [3] Агрессивный (hard)-> TCP #3/#6/#9, QUIC #3\n"
-            printf "Ваш выбор [1/2/3]: "
-            read_input tier_choice
-
-            case "$tier_choice" in
-                1) apply_default_strategies ;;
-                2) apply_medium_strategies ;;
-                3) apply_new_default_strategies ;;
-                *) print_warning "Неверный выбор уровня" ;;
-            esac
             pause
             return
             ;;
@@ -466,95 +442,64 @@ menu_select_quic_strategy() {
         return
     fi
 
+    local current_quic
+    current_quic=$(get_current_quic_strategy)
+
     printf "\n"
     print_info "Всего QUIC стратегий: $total_quic"
-    printf "Текущие QUIC стратегии:\n"
-    printf "  YouTube:    #%s\n" "$(get_current_quic_strategy)"
-    printf "  RuTracker:  #%s\n\n" "$(get_rutracker_quic_strategy)"
+    printf "Текущая YouTube QUIC стратегия: #%s\n\n" "$current_quic"
 
-    while true; do
-        printf "Выберите категорию QUIC:\n"
-        printf "[1] YouTube QUIC\n"
-        printf "[2] RuTracker QUIC\n"
-        printf "[B] Назад\n\n"
-        printf "Ваш выбор: "
-        read_input quic_choice
+    printf "Введите номер QUIC стратегии [1-%s] или Enter для отмены: " "$total_quic"
+    read_input new_strategy
 
-        case "$quic_choice" in
-            1)
-                local category_name="YouTube QUIC"
-                local current_quic
-                current_quic=$(get_current_quic_strategy)
-                ;;
-            2)
-                local category_name="RuTracker QUIC"
-                local current_quic
-                current_quic=$(get_rutracker_quic_strategy)
-                ;;
-            [Bb])
-                return
-                ;;
-            *)
-                print_error "Неверный выбор"
-                continue
-                ;;
-        esac
+    if [ -z "$new_strategy" ]; then
+        print_info "Отменено"
+        pause
+        return
+    fi
 
-        printf "\nТекущая QUIC стратегия: #%s\n" "$current_quic"
-        printf "Введите номер QUIC стратегии [1-%s] или Enter для отмены: " "$total_quic"
-        read_input new_strategy
+    if ! echo "$new_strategy" | grep -qE '^[0-9]+$'; then
+        print_error "Неверный формат номера"
+        pause
+        return
+    fi
 
-        if [ -z "$new_strategy" ]; then
+    if [ "$new_strategy" -lt 1 ] || [ "$new_strategy" -gt "$total_quic" ]; then
+        print_error "Номер вне диапазона"
+        pause
+        return
+    fi
+
+    if ! quic_strategy_exists "$new_strategy"; then
+        print_error "QUIC стратегия #$new_strategy не найдена"
+        pause
+        return
+    fi
+
+    local name
+    local desc
+    local params
+    name=$(get_quic_strategy_name "$new_strategy")
+    desc=$(get_quic_strategy_desc "$new_strategy")
+    params=$(get_quic_strategy "$new_strategy")
+
+    print_info "Выбрана QUIC стратегия #$new_strategy (${name})"
+    [ -n "$desc" ] && printf "  %s\n" "$desc"
+    printf "  %s\n\n" "$params"
+
+    printf "Применить эту QUIC стратегию? [Y/n]: "
+    read_input apply_confirm
+    case "$apply_confirm" in
+        [Nn]|[Nn][Oo])
             print_info "Отменено"
-            return
-        fi
-
-        if ! echo "$new_strategy" | grep -qE '^[0-9]+$'; then
-            print_error "Неверный формат номера"
-            continue
-        fi
-
-        if [ "$new_strategy" -lt 1 ] || [ "$new_strategy" -gt "$total_quic" ]; then
-            print_error "Номер вне диапазона"
-            continue
-        fi
-
-        if ! quic_strategy_exists "$new_strategy"; then
-            print_error "QUIC стратегия #$new_strategy не найдена"
-            continue
-        fi
-
-        local name
-        local desc
-        local params
-        name=$(get_quic_strategy_name "$new_strategy")
-        desc=$(get_quic_strategy_desc "$new_strategy")
-        params=$(get_quic_strategy "$new_strategy")
-
-        print_info "Выбрана QUIC стратегия #$new_strategy (${name})"
-        [ -n "$desc" ] && printf "  %s\n" "$desc"
-        printf "  %s\n\n" "$params"
-
-        printf "Применить эту QUIC стратегию для %s? [Y/n]: " "$category_name"
-        read_input apply_confirm
-        case "$apply_confirm" in
-            [Nn]|[Nn][Oo])
-                print_info "Отменено"
-                return
-                ;;
-            *)
-                if [ "$quic_choice" = "1" ]; then
-                    set_current_quic_strategy "$new_strategy"
-                else
-                    set_rutracker_quic_strategy "$new_strategy"
-                fi
-                apply_current_category_strategies
-                print_success "QUIC стратегия применена"
-                pause
-                return
-                ;;
-        esac
-    done
+            ;;
+        *)
+            set_current_quic_strategy "$new_strategy"
+            apply_current_category_strategies
+            print_success "QUIC стратегия применена"
+            ;;
+    esac
+    pause
 }
 
 # Вспомогательная функция: выбор стратегий для всех категорий
@@ -1378,29 +1323,12 @@ menu_quic_settings() {
     clear_screen
     print_header "Настройки QUIC"
 
-    # Текущий статус
-    local quic_yt_enabled="Включен"
-    local quic_rkn_status
-    if is_rutracker_quic_enabled; then
-        quic_rkn_status="Включен"
-    else
-        quic_rkn_status="Выключен"
-    fi
-
     printf "\nТекущие настройки:\n"
-    printf "  YouTube QUIC:    %s (стратегия #%s)\n" "$quic_yt_enabled" "$(get_current_quic_strategy)"
-    printf "  RuTracker QUIC:  %s" "$quic_rkn_status"
-    if is_rutracker_quic_enabled; then
-        printf " (стратегия #%s)\n" "$(get_rutracker_quic_strategy)"
-    else
-        printf "\n"
-    fi
+    printf "  YouTube QUIC: стратегия #%s\n" "$(get_current_quic_strategy)"
 
     cat <<'MENU'
 
 [1] YouTube QUIC - выбрать стратегию
-[2] RuTracker QUIC - включить/выключить
-[3] RuTracker QUIC - выбрать стратегию
 [B] Назад
 
 MENU
@@ -1410,104 +1338,7 @@ MENU
 
     case "$choice" in
         1)
-            # YouTube QUIC - выбор стратегии
             menu_select_quic_strategy_youtube
-            ;;
-        2)
-            # RuTracker QUIC - включить/выключить
-            menu_toggle_rutracker_quic
-            ;;
-        3)
-            # RuTracker QUIC - выбор стратегии
-            if is_rutracker_quic_enabled; then
-                menu_select_quic_strategy_rutracker
-            else
-                print_warning "RuTracker QUIC выключен"
-                print_info "Сначала включите RuTracker QUIC (опция [2])"
-                pause
-            fi
-            ;;
-        b|B)
-            return 0
-            ;;
-        *)
-            print_error "Неверный выбор: $choice"
-            pause
-            ;;
-    esac
-}
-
-# Включить/выключить QUIC для RuTracker
-menu_toggle_rutracker_quic() {
-    clear_screen
-    print_header "RuTracker QUIC - включить/выключить"
-
-    local current_status
-    if is_rutracker_quic_enabled; then
-        current_status="включен"
-    else
-        current_status="выключен"
-    fi
-
-    printf "\nТекущий статус: %s\n" "$current_status"
-    printf "\nЧто сделать?\n"
-    printf "[1] Включить RuTracker QUIC\n"
-    printf "[2] Выключить RuTracker QUIC\n"
-    printf "[B] Назад\n\n"
-
-    printf "Ваш выбор: "
-    read_input choice
-
-    case "$choice" in
-        1)
-            # Включить
-            set_rutracker_quic_enabled 1
-            print_success "RuTracker QUIC включен"
-
-            # Получить текущие стратегии
-            local config_file="${CONFIG_DIR}/category_strategies.conf"
-            local current_yt_tcp=1
-            local current_yt_gv=1
-            local current_rkn=1
-
-            if [ -f "$config_file" ]; then
-                current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
-                current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
-                current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
-                [ -z "$current_yt_tcp" ] && current_yt_tcp=1
-                [ -z "$current_yt_gv" ] && current_yt_gv=1
-                [ -z "$current_rkn" ] && current_rkn=1
-            fi
-
-            # Применить изменения
-            apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
-            print_success "Изменения применены"
-            pause
-            ;;
-        2)
-            # Выключить
-            set_rutracker_quic_enabled 0
-            print_success "RuTracker QUIC выключен"
-
-            # Получить текущие стратегии
-            local config_file="${CONFIG_DIR}/category_strategies.conf"
-            local current_yt_tcp=1
-            local current_yt_gv=1
-            local current_rkn=1
-
-            if [ -f "$config_file" ]; then
-                current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
-                current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
-                current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
-                [ -z "$current_yt_tcp" ] && current_yt_tcp=1
-                [ -z "$current_yt_gv" ] && current_yt_gv=1
-                [ -z "$current_rkn" ] && current_rkn=1
-            fi
-
-            # Применить изменения
-            apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
-            print_success "Изменения применены"
-            pause
             ;;
         b|B)
             return 0
@@ -1585,75 +1416,6 @@ menu_select_quic_strategy_youtube() {
 
     apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
     print_success "YouTube QUIC стратегия #$new_strategy применена"
-    pause
-}
-
-# Выбор QUIC стратегии для RuTracker
-menu_select_quic_strategy_rutracker() {
-    clear_screen
-    print_header "RuTracker QUIC - выбор стратегии"
-
-    local total_quic
-    total_quic=$(get_quic_strategies_count)
-
-    if [ "$total_quic" -eq 0 ]; then
-        print_error "QUIC стратегии не найдены"
-        pause
-        return 1
-    fi
-
-    local current_quic
-    current_quic=$(get_rutracker_quic_strategy)
-
-    printf "\nВсего QUIC стратегий: %s\n" "$total_quic"
-    printf "Текущая стратегия: #%s\n\n" "$current_quic"
-
-    printf "Введите номер стратегии [1-%s] или Enter для отмены: " "$total_quic"
-    read_input new_strategy
-
-    if [ -z "$new_strategy" ]; then
-        print_info "Отменено"
-        pause
-        return 0
-    fi
-
-    if ! echo "$new_strategy" | grep -qE '^[0-9]+$'; then
-        print_error "Неверный формат"
-        pause
-        return 1
-    fi
-
-    if [ "$new_strategy" -lt 1 ] || [ "$new_strategy" -gt "$total_quic" ]; then
-        print_error "Номер вне диапазона"
-        pause
-        return 1
-    fi
-
-    if ! quic_strategy_exists "$new_strategy"; then
-        print_error "QUIC стратегия #$new_strategy не найдена"
-        pause
-        return 1
-    fi
-
-    set_rutracker_quic_strategy "$new_strategy"
-
-    # Получить текущие стратегии
-    local config_file="${CONFIG_DIR}/category_strategies.conf"
-    local current_yt_tcp=1
-    local current_yt_gv=1
-    local current_rkn=1
-
-    if [ -f "$config_file" ]; then
-        current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        [ -z "$current_yt_tcp" ] && current_yt_tcp=1
-        [ -z "$current_yt_gv" ] && current_yt_gv=1
-        [ -z "$current_rkn" ] && current_rkn=1
-    fi
-
-    apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
-    print_success "RuTracker QUIC стратегия #$new_strategy применена"
     pause
 }
 

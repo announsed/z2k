@@ -16,9 +16,8 @@ download_domain_lists() {
     local yt_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/YT"
     local rkn_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/RKN"
     local yt_udp_dir="${ZAPRET2_DIR}/extra_strats/UDP/YT"
-    local rt_udp_dir="${ZAPRET2_DIR}/extra_strats/UDP/RUTRACKER"
 
-    mkdir -p "$yt_tcp_dir" "$rkn_tcp_dir" "$yt_udp_dir" "$rt_udp_dir" "$LISTS_DIR" || {
+    mkdir -p "$yt_tcp_dir" "$rkn_tcp_dir" "$yt_udp_dir" "$LISTS_DIR" || {
         print_error "Не удалось создать директории"
         return 1
     }
@@ -71,17 +70,6 @@ download_domain_lists() {
         touch "${LISTS_DIR}/custom.txt"
         print_info "Создан custom.txt для пользовательских доменов"
     fi
-
-    # 7. RuTracker QUIC - локальный список
-    cat > "${rt_udp_dir}/List.txt" <<'EOF'
-rutracker.org
-www.rutracker.org
-static.rutracker.cc
-fastpic.org
-t-ru.org
-www.t-ru.org
-EOF
-    print_success "RuTracker QUIC: создан локальный список"
 
     print_separator
     print_success "Списки доменов загружены"
@@ -178,14 +166,6 @@ show_domain_lists_stats() {
         printf "%-30s | %-10s\n" "Custom" "$count"
     fi
 
-    # RuTracker QUIC
-    local rt_quic_list="${ZAPRET2_DIR}/extra_strats/UDP/RUTRACKER/List.txt"
-    if [ -f "$rt_quic_list" ]; then
-        local count
-        count=$(wc -l < "$rt_quic_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s\n" "RuTracker QUIC" "$count"
-    fi
-
     print_separator
 }
 
@@ -202,12 +182,6 @@ show_active_processing() {
         . "$all_tcp443_conf"
         all_tcp443_enabled=$ENABLED
         all_tcp443_strategy=$STRATEGY
-    fi
-
-    # Проверить QUIC RuTracker
-    local rkn_quic_enabled=0
-    if is_rutracker_quic_enabled 2>/dev/null; then
-        rkn_quic_enabled=1
     fi
 
     # Показать режим работы
@@ -256,20 +230,6 @@ show_active_processing() {
         local count
         count=$(wc -l < "$quic_yt_list" 2>/dev/null || echo "0")
         printf "%-30s | %-10s | %s\n" "QUIC YouTube (UDP 443)" "$count" "Активен"
-    fi
-
-    # QUIC RuTracker
-    local rt_quic_list="${ZAPRET2_DIR}/extra_strats/UDP/RUTRACKER/List.txt"
-    if [ -f "$rt_quic_list" ]; then
-        local count
-        count=$(wc -l < "$rt_quic_list" 2>/dev/null || echo "0")
-        local status
-        if [ "$rkn_quic_enabled" = "1" ]; then
-            status="Активен"
-        else
-            status="Выключен"
-        fi
-        printf "%-30s | %-10s | %s\n" "QUIC RuTracker (UDP 443)" "$count" "$status"
     fi
 
     # Discord
@@ -464,18 +424,6 @@ create_base_config() {
         echo "QUIC_STRATEGY=24" > "$QUIC_STRATEGY_FILE"
     fi
 
-    # Создать файл для QUIC стратегии RuTracker
-    if [ ! -f "$RUTRACKER_QUIC_STRATEGY_FILE" ]; then
-        echo "RUTRACKER_QUIC_STRATEGY=43" > "$RUTRACKER_QUIC_STRATEGY_FILE"
-    fi
-
-    # Создать конфиг для включения/выключения QUIC RuTracker (по умолчанию выключено)
-    local rutracker_quic_enabled_conf="${CONFIG_DIR}/rutracker_quic_enabled.conf"
-    if [ ! -f "$rutracker_quic_enabled_conf" ]; then
-        echo "RUTRACKER_QUIC_ENABLED=0" > "$rutracker_quic_enabled_conf"
-        print_success "RuTracker QUIC по умолчанию выключен"
-    fi
-
     # Удалить старый файл QUIC стратегий по категориям (больше не используется)
     local quic_category_conf="${CONFIG_DIR}/quic_category_strategies.conf"
     if [ -f "$quic_category_conf" ]; then
@@ -607,10 +555,6 @@ show_current_config() {
     if [ -f "$QUIC_STRATEGY_FILE" ]; then
         printf "%-25s: #%s\n" "QUIC YouTube" "$(get_current_quic_strategy)"
     fi
-    if [ -f "$RUTRACKER_QUIC_STRATEGY_FILE" ]; then
-        printf "%-25s: #%s\n" "QUIC RuTracker" "$(get_rutracker_quic_strategy)"
-    fi
-
     print_separator
 
     # Списки доменов
@@ -628,12 +572,6 @@ show_current_config() {
             local yt_quic_count
             yt_quic_count=$(wc -l < "$yt_quic_list" 2>/dev/null || echo "0")
             printf "  %-20s: %s доменов\n" "extra_strats/UDP/YT/List.txt" "$yt_quic_count"
-        fi
-        local rt_quic_list="${ZAPRET2_DIR}/extra_strats/UDP/RUTRACKER/List.txt"
-        if [ -f "$rt_quic_list" ]; then
-            local rt_quic_count
-            rt_quic_count=$(wc -l < "$rt_quic_list" 2>/dev/null || echo "0")
-            printf "  %-20s: %s доменов\n" "extra_strats/UDP/RUTRACKER/List.txt" "$rt_quic_count"
         fi
     else
         print_info "Списки доменов: не установлены"

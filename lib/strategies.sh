@@ -30,7 +30,7 @@ load_current_categories() {
 }
 
 # Сохранить стратегию в файл категории
-# $1 - категория (YT, YT_GV, RKN, RUTRACKER)
+# $1 - категория (YT, YT_GV, RKN)
 # $2 - протокол (TCP или UDP)
 # $3 - параметры стратегии
 save_strategy_to_category() {
@@ -78,14 +78,12 @@ create_default_strategy_files() {
     mkdir -p "$extra_strats_dir/TCP/YT_GV"
     mkdir -p "$extra_strats_dir/TCP/RKN"
     mkdir -p "$extra_strats_dir/UDP/YT"
-    mkdir -p "$extra_strats_dir/UDP/RUTRACKER"
 
     # Сохранить дефолтные стратегии
     echo "$default_tcp" > "$extra_strats_dir/TCP/YT/Strategy.txt"
     echo "$default_tcp" > "$extra_strats_dir/TCP/YT_GV/Strategy.txt"
     echo "$default_tcp" > "$extra_strats_dir/TCP/RKN/Strategy.txt"
     echo "$default_udp" > "$extra_strats_dir/UDP/YT/Strategy.txt"
-    echo "$default_udp" > "$extra_strats_dir/UDP/RUTRACKER/Strategy.txt"
 
     print_success "Дефолтные файлы стратегий созданы"
     return 0
@@ -293,47 +291,11 @@ get_current_quic_strategy() {
     echo "1"
 }
 
-# Получить текущую QUIC стратегию для RuTracker
-get_rutracker_quic_strategy() {
-    local conf="${RUTRACKER_QUIC_STRATEGY_FILE:-${CONFIG_DIR}/rutracker_quic_strategy.conf}"
-    if [ -f "$conf" ]; then
-        . "$conf"
-        [ -n "$RUTRACKER_QUIC_STRATEGY" ] && echo "$RUTRACKER_QUIC_STRATEGY" && return 0
-    fi
-    echo "43"
-}
-
-# Проверить включен ли QUIC для RuTracker
-is_rutracker_quic_enabled() {
-    local conf="${CONFIG_DIR}/rutracker_quic_enabled.conf"
-    if [ -f "$conf" ]; then
-        . "$conf"
-        [ "$RUTRACKER_QUIC_ENABLED" = "1" ] && return 0
-    fi
-    return 1
-}
-
-# Включить/выключить QUIC для RuTracker
-set_rutracker_quic_enabled() {
-    local enabled=$1  # 1 или 0
-    local conf="${CONFIG_DIR}/rutracker_quic_enabled.conf"
-    mkdir -p "$CONFIG_DIR" 2>/dev/null
-    echo "RUTRACKER_QUIC_ENABLED=${enabled}" > "$conf"
-}
-
-
 # Сохранить текущую QUIC стратегию
 set_current_quic_strategy() {
     local num=$1
     local conf="${QUIC_STRATEGY_FILE:-${CONFIG_DIR}/quic_strategy.conf}"
     echo "QUIC_STRATEGY=$num" > "$conf"
-}
-
-# Сохранить текущую QUIC стратегию для RuTracker
-set_rutracker_quic_strategy() {
-    local num=$1
-    local conf="${RUTRACKER_QUIC_STRATEGY_FILE:-${CONFIG_DIR}/rutracker_quic_strategy.conf}"
-    echo "RUTRACKER_QUIC_STRATEGY=$num" > "$conf"
 }
 
 
@@ -347,20 +309,6 @@ build_quic_profile_params() {
 get_current_quic_profile_params() {
     local quic_strategy
     quic_strategy=$(get_current_quic_strategy)
-    local quic_params
-    quic_params=$(get_quic_strategy "$quic_strategy" 2>/dev/null)
-
-    if [ -z "$quic_params" ]; then
-        quic_params="--payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
-    fi
-
-    build_quic_profile_params "$quic_params"
-}
-
-# Получить параметры QUIC профиля для RuTracker
-get_rutracker_quic_profile_params() {
-    local quic_strategy
-    quic_strategy=$(get_rutracker_quic_strategy)
     local quic_params
     quic_params=$(get_quic_strategy "$quic_strategy" 2>/dev/null)
 
@@ -564,12 +512,6 @@ CUSTOM_UDP=""
 QUIC_TCP=""
 QUIC_UDP="$quic_params"
 # QUIC_MARKER_END
-
-# QUIC стратегия (RuTracker UDP 443)
-# QUIC_RKN_MARKER_START
-QUIC_RKN_TCP=""
-QUIC_RKN_UDP="$quic_params"
-# QUIC_RKN_MARKER_END
 PROFILE
 }
 
@@ -624,7 +566,6 @@ apply_strategy() {
     save_strategy_to_category "YT_GV" "TCP" "$tcp_params" || return 1
     save_strategy_to_category "RKN" "TCP" "$tcp_params" || return 1
     save_strategy_to_category "YT" "UDP" "$udp_params" || return 1
-    save_strategy_to_category "RUTRACKER" "UDP" "$udp_params" || return 1
 
     # Обновить config файл (NFQWS2_OPT секцию)
     print_info "Обновление config файла..."
@@ -1760,7 +1701,6 @@ apply_category_strategies_v2() {
     save_strategy_to_category "YT_GV" "TCP" "$yt_gv_full" || return 1
     save_strategy_to_category "RKN" "TCP" "$rkn_full" || return 1
     save_strategy_to_category "YT" "UDP" "$udp_quic" || return 1
-    save_strategy_to_category "RUTRACKER" "UDP" "$udp_quic" || return 1
 
     # Обновить config файл (NFQWS2_OPT секцию)
     print_info "Обновление config файла..."
@@ -1817,96 +1757,6 @@ youtube_tcp:${yt_tcp_strategy}
 youtube_gv:${yt_gv_strategy}
 rkn:${rkn_strategy}
 EOF
-}
-
-# ==============================================================================
-# ПРИМЕНЕНИЕ ДЕФОЛТНЫХ СТРАТЕГИЙ
-# ==============================================================================
-
-# Применить набор стратегий по уровню (soft/medium/aggressive)
-apply_tiered_strategies() {
-    local tier="$1"
-    local auto_mode=0
-
-    if [ "$2" = "--auto" ]; then
-        auto_mode=1
-    fi
-
-    local yt_tcp=""
-    local yt_gv=""
-    local rkn=""
-    local quic=""
-
-    case "$tier" in
-        soft)
-            yt_tcp=1; yt_gv=4; rkn=7; quic=1
-            print_header "Применение мягких стратегий"
-            ;;
-        medium)
-            yt_tcp=2; yt_gv=5; rkn=8; quic=2
-            print_header "Применение средних стратегий"
-            ;;
-        aggressive)
-            yt_tcp=3; yt_gv=6; rkn=9; quic=3
-            print_header "Применение агрессивных стратегий"
-            ;;
-        *)
-            print_error "Неизвестный уровень: $tier"
-            return 1
-            ;;
-    esac
-
-    print_info "Будут применены следующие стратегии:"
-    print_info "  YouTube TCP: #$yt_tcp"
-    print_info "  YouTube GV:  #$yt_gv"
-    print_info "  RKN:         #$rkn"
-    print_info "  YouTube QUIC: #$quic"
-    printf "\n"
-
-    if [ "$auto_mode" -eq 0 ]; then
-        if ! confirm "Применить выбранный набор стратегий?"; then
-            print_info "Отменено"
-            return 0
-        fi
-    fi
-
-    if ! strategy_exists "$yt_tcp"; then
-        print_warning "Стратегия #$yt_tcp не найдена, используется #1"
-        yt_tcp=1
-    fi
-    if ! strategy_exists "$yt_gv"; then
-        print_warning "Стратегия #$yt_gv не найдена, используется #1"
-        yt_gv=1
-    fi
-    if ! strategy_exists "$rkn"; then
-        print_warning "Стратегия #$rkn не найдена, используется #1"
-        rkn=1
-    fi
-
-    apply_category_strategies_v2 "$yt_tcp" "$yt_gv" "$rkn"
-
-    if quic_strategy_exists "$quic"; then
-        set_current_quic_strategy "$quic"
-    else
-        print_warning "QUIC стратегия #$quic не найдена, оставляю текущую"
-    fi
-
-    return 0
-}
-
-# Применить мягкие стратегии (по умолчанию)
-apply_default_strategies() {
-    apply_tiered_strategies soft "$@"
-}
-
-# Применить средние стратегии
-apply_medium_strategies() {
-    apply_tiered_strategies medium "$@"
-}
-
-# Применить агрессивные стратегии (совместимость)
-apply_new_default_strategies() {
-    apply_tiered_strategies aggressive "$@"
 }
 
 # Применить autocircular стратегии (автоперебор внутри профиля)
