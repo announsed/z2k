@@ -68,13 +68,14 @@ MENU
 [8] Резервная копия/Восстановление
 [9] Удалить zapret2
 [A] Режим ALL TCP-443 (без хостлистов)
+[C] Конструктор circular (автоперебор)
 [Q] Настройки QUIC
 [W] Whitelist (исключения)
 [0] Выход
 
 MENU
 
-        printf "Выберите опцию [0-9,A,Q,W]: "
+        printf "Выберите опцию [0-9,A,C,Q,W]: "
         read_input choice
 
         case "$choice" in
@@ -101,6 +102,9 @@ MENU
                 ;;
             a|A)
                 menu_all_tcp443
+                ;;
+            c|C)
+                menu_circular_builder
                 ;;
             q|Q)
                 menu_quic_settings
@@ -795,6 +799,9 @@ menu_service_control() {
 [2] Остановить сервис
 [3] Перезапустить сервис
 [4] Статус сервиса
+[5] Состояние circular (SIGUSR2)
+[6] Conntrack пул (SIGUSR1)
+[7] Логи nfqws2
 [B] Назад
 
 SUBMENU
@@ -817,6 +824,15 @@ SUBMENU
             ;;
         4)
             "$INIT_SCRIPT" status
+            ;;
+        5)
+            show_circular_state
+            ;;
+        6)
+            show_conntrack_pool
+            ;;
+        7)
+            show_nfqws2_logs
             ;;
         [Bb])
             return
@@ -1648,6 +1664,337 @@ menu_select_quic_strategy_rutracker() {
     pause
 }
 
+
+# ==============================================================================
+# ПОДМЕНЮ: КОНСТРУКТОР CIRCULAR
+# ==============================================================================
+
+menu_circular_builder() {
+    if ! is_zapret2_installed; then
+        print_error "zapret2 не установлен"
+        pause
+        return
+    fi
+
+    while true; do
+        clear_screen
+        print_header "[C] Конструктор circular (автоперебор стратегий)"
+
+        cat <<'SUBMENU'
+
+Circular оркестратор автоматически перебирает стратегии
+при сбоях соединения (DPI-блокировке).
+
+[1] Собрать circular вручную (выбор стратегий)
+[2] Автосборка (тест + выбор рабочих)
+[3] Параметры TCP circular (fails/time)
+[4] Параметры QUIC circular (udp_in/udp_out)
+[5] Вернуть стандартный autocircular
+[6] Показать текущий circular
+[B] Назад
+
+SUBMENU
+        printf "Ваш выбор: "
+        read_input choice
+
+        case "$choice" in
+            1)
+                menu_circular_pick_strategies
+                ;;
+            2)
+                menu_circular_auto_build
+                ;;
+            3)
+                menu_circular_params "tcp"
+                ;;
+            4)
+                menu_circular_params "quic"
+                ;;
+            5)
+                menu_circular_restore_default
+                ;;
+            6)
+                menu_circular_show
+                ;;
+            [Bb])
+                return
+                ;;
+            *)
+                print_error "Неверный выбор"
+                pause
+                ;;
+        esac
+    done
+}
+
+# Выбор стратегий вручную для circular
+menu_circular_pick_strategies() {
+    clear_screen
+    print_header "Сборка circular из стратегий"
+
+    # Выбор типа: TCP или QUIC
+    printf "\nТип стратегий:\n"
+    printf "[1] TCP стратегии\n"
+    printf "[2] QUIC стратегии\n"
+    printf "[B] Назад\n\n"
+    printf "Ваш выбор: "
+    read_input type_choice
+
+    case "$type_choice" in
+        1) _menu_circular_pick_tcp ;;
+        2) _menu_circular_pick_quic ;;
+        [Bb]) return ;;
+        *) print_error "Неверный выбор"; pause ;;
+    esac
+}
+
+_menu_circular_pick_tcp() {
+    local total_count
+    total_count=$(get_strategies_count)
+    local conf="${STRATEGIES_CONF:-${CONFIG_DIR}/strategies.conf}"
+
+    print_separator
+    print_info "Доступные TCP стратегии (всего: $total_count):"
+    printf "\n"
+
+    # Показать стратегии постранично по 20
+    local page=1 per_page=20 shown=0
+    while IFS='|' read -r num type params name; do
+        [ -z "$num" ] && continue
+        shown=$((shown + 1))
+        if [ $shown -gt $(( (page - 1) * per_page )) ] && [ $shown -le $((page * per_page)) ]; then
+            local short_params
+            short_params=$(printf "%s" "$params" | cut -c1-60)
+            if [ -n "$name" ]; then
+                printf "  #%-3s [%s] %s\n" "$num" "$name" "$short_params"
+            else
+                printf "  #%-3s %s\n" "$num" "$short_params"
+            fi
+        fi
+    done < "$conf"
+
+    if [ $total_count -gt $per_page ]; then
+        printf "\n  (показаны 1-%s из %s, введите 'n' для следующей страницы)\n" "$per_page" "$total_count"
+    fi
+
+    # Ввод диапазона
+    printf "\nВведите номера стратегий через запятую или диапазон\n"
+    printf "Примеры: 1,3,5  или  1-10  или  1,3,5-10,15\n"
+    printf "Или Enter для отмены: "
+    read_input range_input
+
+    [ -z "$range_input" ] && { print_info "Отменено"; pause; return; }
+
+    local nums
+    nums=$(parse_strategy_range "$range_input")
+    if [ -z "$nums" ]; then
+        print_error "Неверный формат диапазона: $range_input"
+        pause
+        return
+    fi
+
+    local count=0
+    for _ in $nums; do count=$((count + 1)); done
+    if [ "$count" -lt 2 ]; then
+        print_error "Для circular нужно минимум 2 стратегии"
+        pause
+        return
+    fi
+
+    print_info "Выбрано стратегий: $count ($nums)"
+    printf "\n"
+
+    # Выбор категории
+    printf "Применить к категории:\n"
+    printf "[1] YouTube TCP\n"
+    printf "[2] YouTube GV\n"
+    printf "[3] RKN\n"
+    printf "[4] Все TCP категории\n"
+    printf "[B] Отмена\n\n"
+    printf "Ваш выбор: "
+    read_input cat_choice
+
+    case "$cat_choice" in
+        1) apply_custom_circular "YT" "$nums" && print_success "Circular для YouTube TCP применён ($count стратегий)" ;;
+        2) apply_custom_circular "YT_GV" "$nums" && print_success "Circular для YouTube GV применён ($count стратегий)" ;;
+        3) apply_custom_circular "RKN" "$nums" && print_success "Circular для RKN применён ($count стратегий)" ;;
+        4)
+            apply_custom_circular "YT" "$nums"
+            apply_custom_circular "YT_GV" "$nums"
+            apply_custom_circular "RKN" "$nums"
+            print_success "Circular применён ко всем TCP категориям ($count стратегий)"
+            ;;
+        [Bb]) print_info "Отменено" ;;
+        *) print_error "Неверный выбор" ;;
+    esac
+    pause
+}
+
+_menu_circular_pick_quic() {
+    local total_quic
+    total_quic=$(get_quic_strategies_count)
+    local conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR}/quic_strategies.conf}"
+
+    print_separator
+    print_info "Доступные QUIC стратегии (всего: $total_quic):"
+    printf "\n"
+
+    while IFS='|' read -r num name args desc; do
+        [ -z "$num" ] && continue
+        printf "  #%-3s [%s] %s\n" "$num" "$name" "${desc:-$args}" | cut -c1-78
+    done < "$conf"
+
+    printf "\nВведите номера стратегий (пример: 1,3,5-10) или Enter для отмены: "
+    read_input range_input
+
+    [ -z "$range_input" ] && { print_info "Отменено"; pause; return; }
+
+    local nums
+    nums=$(parse_strategy_range "$range_input")
+    if [ -z "$nums" ]; then
+        print_error "Неверный формат диапазона: $range_input"
+        pause
+        return
+    fi
+
+    local count=0
+    for _ in $nums; do count=$((count + 1)); done
+    if [ "$count" -lt 2 ]; then
+        print_error "Для circular нужно минимум 2 стратегии"
+        pause
+        return
+    fi
+
+    print_info "Выбрано QUIC стратегий: $count ($nums)"
+    printf "\nПрименить QUIC circular? [Y/n]: "
+    read_input confirm
+    case "$confirm" in
+        [Nn]) print_info "Отменено" ;;
+        *)
+            apply_custom_quic_circular "$nums"
+            print_success "QUIC circular применён ($count стратегий)"
+            ;;
+    esac
+    pause
+}
+
+# Автосборка circular из результатов тестирования
+menu_circular_auto_build() {
+    clear_screen
+    print_header "Автосборка circular (тест стратегий)"
+
+    printf "\nВыберите категорию для автосборки:\n"
+    printf "[1] YouTube TCP (youtube.com)\n"
+    printf "[2] YouTube GV (googlevideo.com)\n"
+    printf "[3] RKN (rutracker.org)\n"
+    printf "[B] Назад\n\n"
+    printf "Ваш выбор: "
+    read_input cat_choice
+
+    local category
+    case "$cat_choice" in
+        1) category="YT" ;;
+        2) category="YT_GV" ;;
+        3) category="RKN" ;;
+        [Bb]) return ;;
+        *) print_error "Неверный выбор"; pause; return ;;
+    esac
+
+    local total_count
+    total_count=$(get_strategies_count)
+
+    printf "\nДиапазон стратегий для тестирования [1-%s]\n" "$total_count"
+    printf "Формат: 1-12 или 1,3,5-10 (по умолчанию: 1-12): "
+    read_input range_input
+    [ -z "$range_input" ] && range_input="1-12"
+
+    printf "\nМинимальная оценка для включения (1-5, по умолчанию 3): "
+    read_input min_score
+    [ -z "$min_score" ] && min_score=3
+
+    print_separator
+    print_warning "Автосборка займёт время. Каждая стратегия тестируется ~5 сек."
+    printf "Начать? [Y/n]: "
+    read_input confirm
+    case "$confirm" in
+        [Nn]) print_info "Отменено"; pause; return ;;
+    esac
+
+    auto_build_circular "$category" "$range_input" "$min_score"
+    pause
+}
+
+# Настройка параметров circular
+menu_circular_params() {
+    local mode=$1  # "tcp" или "quic"
+    clear_screen
+
+    load_circular_params
+
+    if [ "$mode" = "quic" ]; then
+        print_header "Параметры QUIC circular"
+        printf "\nТекущие параметры:\n"
+        printf "  fails   = %s  (сбоев до переключения)\n" "${CIRCULAR_FAILS:-2}"
+        printf "  time    = %s  (окно времени, сек)\n" "${CIRCULAR_TIME:-60}"
+        printf "  udp_in  = %s  (входящих пакетов до анализа)\n" "${CIRCULAR_UDP_IN:-1}"
+        printf "  udp_out = %s  (исходящих пакетов до анализа)\n" "${CIRCULAR_UDP_OUT:-4}"
+    else
+        print_header "Параметры TCP circular"
+        printf "\nТекущие параметры:\n"
+        printf "  fails = %s  (сбоев до переключения стратегии)\n" "${CIRCULAR_FAILS:-2}"
+        printf "  time  = %s  (окно времени в секундах)\n" "${CIRCULAR_TIME:-60}"
+    fi
+
+    print_separator
+    printf "\nВведите новое значение fails (Enter = оставить %s): " "${CIRCULAR_FAILS:-2}"
+    read_input new_fails
+    [ -n "$new_fails" ] && CIRCULAR_FAILS="$new_fails"
+
+    printf "Введите новое значение time (Enter = оставить %s): " "${CIRCULAR_TIME:-60}"
+    read_input new_time
+    [ -n "$new_time" ] && CIRCULAR_TIME="$new_time"
+
+    if [ "$mode" = "quic" ]; then
+        printf "Введите новое значение udp_in (Enter = оставить %s): " "${CIRCULAR_UDP_IN:-1}"
+        read_input new_udp_in
+        [ -n "$new_udp_in" ] && CIRCULAR_UDP_IN="$new_udp_in"
+
+        printf "Введите новое значение udp_out (Enter = оставить %s): " "${CIRCULAR_UDP_OUT:-4}"
+        read_input new_udp_out
+        [ -n "$new_udp_out" ] && CIRCULAR_UDP_OUT="$new_udp_out"
+    fi
+
+    save_circular_params
+    print_success "Параметры circular сохранены"
+    printf "\nПримечание: параметры будут использованы при следующей сборке circular.\n"
+    printf "Для применения пересоберите circular (опции 1 или 2).\n"
+    pause
+}
+
+# Восстановить стандартный autocircular
+menu_circular_restore_default() {
+    clear_screen
+    print_header "Восстановление стандартного autocircular"
+
+    printf "\nЭто заменит текущие circular стратегии на стандартные\n"
+    printf "autocircular из strats_new2.txt / quic_strats.ini.\n\n"
+    printf "Продолжить? [Y/n]: "
+    read_input confirm
+    case "$confirm" in
+        [Nn]) print_info "Отменено"; pause; return ;;
+    esac
+
+    apply_autocircular_strategies
+    print_success "Стандартный autocircular восстановлен"
+    pause
+}
+
+# Показать текущее состояние circular
+menu_circular_show() {
+    clear_screen
+    show_circular_info
+    pause
+}
 
 # ==============================================================================
 # ЭКСПОРТ ФУНКЦИЙ

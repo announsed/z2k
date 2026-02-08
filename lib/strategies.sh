@@ -2002,3 +2002,360 @@ apply_autocircular_strategies() {
 
     return 0
 }
+
+# ==============================================================================
+# КОНСТРУКТОР CIRCULAR СТРАТЕГИЙ
+# ==============================================================================
+
+# Парсинг диапазона: "1,3,5-10,15" → "1 3 5 6 7 8 9 10 15"
+parse_strategy_range() {
+    local input=$1
+    local result=""
+    local items
+    items=$(echo "$input" | tr ',' ' ')
+
+    for item in $items; do
+        case "$item" in
+            *-*)
+                local range_start range_end
+                range_start=$(echo "$item" | cut -d'-' -f1)
+                range_end=$(echo "$item" | cut -d'-' -f2)
+                case "$range_start$range_end" in *[!0-9]*) continue ;; esac
+                [ "$range_start" -gt "$range_end" ] 2>/dev/null && continue
+                local i=$range_start
+                while [ "$i" -le "$range_end" ]; do
+                    result="$result $i"
+                    i=$((i + 1))
+                done
+                ;;
+            *)
+                case "$item" in *[!0-9]*) continue ;; esac
+                [ -n "$item" ] && result="$result $item"
+                ;;
+        esac
+    done
+    echo "$result" | sed 's/^ *//'
+}
+
+# Извлечь --lua-desync=... инстансы из параметров стратегии
+extract_desync_instances() {
+    local params=$1
+    local result=""
+    local rest="$params"
+
+    while true; do
+        case "$rest" in
+            *"--lua-desync="*)
+                rest="${rest#*--lua-desync=}"
+                local value
+                case "$rest" in
+                    *" --"*) value="${rest%% --*}"; rest="${rest#* }" ;;
+                    *) value="$rest"; rest="" ;;
+                esac
+                result="$result --lua-desync=$value"
+                ;;
+            *) break ;;
+        esac
+    done
+    echo "$result" | sed 's/^ *//'
+}
+
+# Собрать circular TCP стратегию из набора
+# $1 - номера стратегий (пробел), $2 - fails, $3 - time
+build_circular_params() {
+    local strategy_nums=$1
+    local fails=${2:-2}
+    local time_sec=${3:-60}
+
+    local prefix="--filter-tcp=443,2053,2083,2087,2096,8443 --filter-l7=tls --payload=tls_client_hello --out-range=-n10"
+    local head="--lua-desync=circular:fails=${fails}:time=${time_sec}"
+    local instances=""
+    local sn=1
+
+    for num in $strategy_nums; do
+        local params
+        params=$(get_strategy "$num")
+        [ -z "$params" ] && continue
+
+        local desync_parts
+        desync_parts=$(extract_desync_instances "$params")
+        [ -z "$desync_parts" ] && continue
+
+        local part_rest="$desync_parts"
+        while true; do
+            case "$part_rest" in
+                *"--lua-desync="*)
+                    part_rest="${part_rest#*--lua-desync=}"
+                    local value
+                    case "$part_rest" in
+                        *" --lua-desync="*) value="${part_rest%% --lua-desync=*}"; part_rest="--lua-desync=${part_rest#* --lua-desync=}" ;;
+                        *) value="$part_rest"; part_rest="" ;;
+                    esac
+                    value=$(echo "$value" | sed 's/:strategy=[0-9]*//g')
+                    case "$value" in
+                        *":payload="*) ;;
+                        "circular:"*) ;;
+                        *) value="${value}:payload=tls_client_hello:dir=out" ;;
+                    esac
+                    case "$value" in
+                        "circular:"*) ;;
+                        *) instances="$instances --lua-desync=${value}:strategy=${sn}" ;;
+                    esac
+                    ;;
+                *) break ;;
+            esac
+        done
+        sn=$((sn + 1))
+    done
+
+    [ -z "$instances" ] && return 1
+    echo "${prefix} ${head}${instances}"
+}
+
+# Собрать circular QUIC стратегию
+# $1 - номера, $2 - fails, $3 - time, $4 - udp_in, $5 - udp_out
+build_quic_circular_params() {
+    local strategy_nums=$1
+    local fails=${2:-2}
+    local time_sec=${3:-60}
+    local udp_in=${4:-1}
+    local udp_out=${5:-4}
+
+    local prefix="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all"
+    local head="--lua-desync=circular:fails=${fails}:time=${time_sec}:udp_in=${udp_in}:udp_out=${udp_out}"
+    local instances=""
+    local sn=1
+
+    for num in $strategy_nums; do
+        local params
+        params=$(get_quic_strategy "$num" 2>/dev/null)
+        [ -z "$params" ] && continue
+
+        local desync_parts
+        desync_parts=$(extract_desync_instances "$params")
+        [ -z "$desync_parts" ] && continue
+
+        local part_rest="$desync_parts"
+        while true; do
+            case "$part_rest" in
+                *"--lua-desync="*)
+                    part_rest="${part_rest#*--lua-desync=}"
+                    local value
+                    case "$part_rest" in
+                        *" --lua-desync="*) value="${part_rest%% --lua-desync=*}"; part_rest="--lua-desync=${part_rest#* --lua-desync=}" ;;
+                        *) value="$part_rest"; part_rest="" ;;
+                    esac
+                    value=$(echo "$value" | sed 's/:strategy=[0-9]*//g')
+                    case "$value" in
+                        "circular:"*) ;;
+                        *":payload="*) instances="$instances --lua-desync=${value}:strategy=${sn}" ;;
+                        *) instances="$instances --lua-desync=${value}:payload=quic_initial:dir=out:strategy=${sn}" ;;
+                    esac
+                    ;;
+                *) break ;;
+            esac
+        done
+        sn=$((sn + 1))
+    done
+
+    [ -z "$instances" ] && return 1
+    echo "${prefix} ${head}${instances}"
+}
+
+# Параметры circular: загрузка/сохранение
+load_circular_params() {
+    CIRCULAR_FAILS=2; CIRCULAR_TIME=60; CIRCULAR_UDP_IN=1; CIRCULAR_UDP_OUT=4
+    [ -f "${CONFIG_DIR}/circular_params.conf" ] && . "${CONFIG_DIR}/circular_params.conf"
+}
+
+save_circular_params() {
+    mkdir -p "$CONFIG_DIR" 2>/dev/null
+    cat > "${CONFIG_DIR}/circular_params.conf" <<EOF
+CIRCULAR_FAILS=${CIRCULAR_FAILS:-2}
+CIRCULAR_TIME=${CIRCULAR_TIME:-60}
+CIRCULAR_UDP_IN=${CIRCULAR_UDP_IN:-1}
+CIRCULAR_UDP_OUT=${CIRCULAR_UDP_OUT:-4}
+EOF
+}
+
+# Состав circular: сохранение/загрузка
+save_circular_strategies() {
+    local category=$1 strategy_list=$2
+    local conf="${CONFIG_DIR}/circular_strategies.conf"
+    mkdir -p "$CONFIG_DIR" 2>/dev/null
+    local csv
+    csv=$(echo "$strategy_list" | tr ' ' ',')
+    if [ -f "$conf" ] && grep -q "^${category}:" "$conf" 2>/dev/null; then
+        sed -i "s|^${category}:.*|${category}:${csv}|" "$conf"
+    else
+        echo "${category}:${csv}" >> "$conf"
+    fi
+}
+
+load_circular_strategies() {
+    local category=$1
+    [ -f "${CONFIG_DIR}/circular_strategies.conf" ] && \
+        grep "^${category}:" "${CONFIG_DIR}/circular_strategies.conf" 2>/dev/null | cut -d':' -f2 | tr ',' ' '
+}
+
+# Применить circular для TCP категории
+apply_custom_circular() {
+    local category=$1 strategy_nums=$2
+    load_circular_params
+    local circular_params
+    circular_params=$(build_circular_params "$strategy_nums" "$CIRCULAR_FAILS" "$CIRCULAR_TIME") || {
+        print_error "Не удалось собрать circular для $category"; return 1
+    }
+    local count
+    count=$(echo "$circular_params" | grep -o 'strategy=[0-9]*' | wc -l)
+    print_info "Circular $category: $count вариантов (fails=$CIRCULAR_FAILS, time=$CIRCULAR_TIME)"
+    save_strategy_to_category "$category" "TCP" "$circular_params" || return 1
+    save_circular_strategies "${category}_TCP" "$strategy_nums"
+}
+
+# Применить circular QUIC
+apply_custom_quic_circular() {
+    local strategy_nums=$1
+    load_circular_params
+    local circular_params
+    circular_params=$(build_quic_circular_params "$strategy_nums" "$CIRCULAR_FAILS" "$CIRCULAR_TIME" "$CIRCULAR_UDP_IN" "$CIRCULAR_UDP_OUT") || {
+        print_error "Не удалось собрать QUIC circular"; return 1
+    }
+    local count
+    count=$(echo "$circular_params" | grep -o 'strategy=[0-9]*' | wc -l)
+    print_info "QUIC Circular: $count вариантов"
+    save_strategy_to_category "YT" "UDP" "$circular_params" || return 1
+    save_circular_strategies "QUIC" "$strategy_nums"
+}
+
+# Показать текущий circular набор
+show_circular_info() {
+    local extra="${ZAPRET2_DIR:-/opt/zapret2}/extra_strats"
+    print_header "Текущие circular стратегии"
+
+    for cat_dir in TCP/YT TCP/YT_GV TCP/RKN; do
+        local f="${extra}/${cat_dir}/Strategy.txt"
+        local name; name=$(echo "$cat_dir" | sed 's|TCP/||')
+        if [ -f "$f" ]; then
+            local p; p=$(cat "$f")
+            case "$p" in
+                *"--lua-desync=circular:"*)
+                    local c; c=$(echo "$p" | grep -o 'strategy=[0-9]*' | wc -l)
+                    local fl; fl=$(echo "$p" | sed -n 's/.*circular:fails=\([0-9]*\).*/\1/p')
+                    local t; t=$(echo "$p" | sed -n 's/.*:time=\([0-9]*\).*/\1/p')
+                    printf "  %-8s: circular (%d вариантов, fails=%s, time=%s)\n" "$name" "$c" "$fl" "$t" ;;
+                *) printf "  %-8s: обычная стратегия\n" "$name" ;;
+            esac
+        else
+            printf "  %-8s: не настроена\n" "$name"
+        fi
+    done
+
+    local qf="${extra}/UDP/YT/Strategy.txt"
+    if [ -f "$qf" ]; then
+        local p; p=$(cat "$qf")
+        case "$p" in
+            *"--lua-desync=circular:"*)
+                local c; c=$(echo "$p" | grep -o 'strategy=[0-9]*' | wc -l)
+                local fl; fl=$(echo "$p" | sed -n 's/.*circular:fails=\([0-9]*\).*/\1/p')
+                local t; t=$(echo "$p" | sed -n 's/.*:time=\([0-9]*\).*/\1/p')
+                printf "  QUIC:    circular (%d вариантов, fails=%s, time=%s)\n" "$c" "$fl" "$t" ;;
+            *) printf "  QUIC:    обычная стратегия\n" ;;
+        esac
+    fi
+}
+
+# ==============================================================================
+# МОНИТОРИНГ NFQWS2
+# ==============================================================================
+
+send_nfqws2_signal() {
+    local sig=$1
+    is_zapret2_running || { print_error "nfqws2 не запущен"; return 1; }
+    local pid; pid=$(pgrep -f "nfqws2" | head -n 1)
+    [ -z "$pid" ] && { print_error "PID не найден"; return 1; }
+    kill -"$sig" "$pid" 2>/dev/null || { print_error "Ошибка отправки $sig"; return 1; }
+    print_success "Сигнал $sig отправлен (PID: $pid)"
+}
+
+# Чтение логов nfqws2 с платформо-зависимым источником
+_read_nfqws2_log() {
+    local lines=${1:-50}
+    if command -v logread >/dev/null 2>&1; then
+        logread 2>/dev/null | grep -i "nfqws2" | tail -"$lines"
+    elif [ -f /var/log/syslog ]; then
+        grep -i "nfqws2" /var/log/syslog | tail -"$lines"
+    elif command -v journalctl >/dev/null 2>&1; then
+        journalctl -u zapret2 --no-pager -n "$lines" 2>/dev/null
+    else
+        print_info "Попробуйте: logread | grep nfqws2"
+    fi
+}
+
+show_circular_state() {
+    print_header "Состояние circular (SIGUSR2)"
+    send_nfqws2_signal USR2 || return 1
+    sleep 1
+    _read_nfqws2_log 30
+}
+
+show_conntrack_pool() {
+    print_header "Conntrack пул (SIGUSR1)"
+    send_nfqws2_signal USR1 || return 1
+    sleep 1
+    _read_nfqws2_log 50
+}
+
+show_nfqws2_logs() {
+    print_header "Логи nfqws2 (последние ${1:-50} строк)"
+    _read_nfqws2_log "${1:-50}"
+}
+
+# ==============================================================================
+# АВТОСБОРКА CIRCULAR ИЗ ТЕСТИРОВАНИЯ
+# ==============================================================================
+
+# Тестировать стратегии и вернуть рабочие
+auto_discover_working_strategies() {
+    local test_domain=${1:-"youtube.com"} strategy_nums=$2 min_score=${3:-3}
+    local working="" tested=0 total=0
+    for _ in $strategy_nums; do total=$((total + 1)); done
+
+    for num in $strategy_nums; do
+        tested=$((tested + 1))
+        printf "\r  [%d/%d] #%s..." "$tested" "$total" "$num" >&2
+        apply_strategy "$num" >/dev/null 2>&1 || continue
+        sleep 3
+        local score; score=$(test_strategy_score)
+        if [ "$score" -ge "$min_score" ]; then
+            printf " OK (%d/5)\n" "$score" >&2
+            working="$working $num"
+        else
+            printf " (%d/5)\n" "$score" >&2
+        fi
+    done
+    printf "\n" >&2
+    echo "$working" | sed 's/^ *//'
+}
+
+# Автосборка circular для категории
+auto_build_circular() {
+    local category=$1 range=${2:-"1-12"} min_score=${3:-3}
+    local nums; nums=$(parse_strategy_range "$range")
+    [ -z "$nums" ] && { print_error "Неверный диапазон: $range"; return 1; }
+
+    local total; total=$(echo "$nums" | wc -w)
+    print_info "Тестирование $total стратегий для $category..."
+
+    local td
+    case "$category" in
+        YT) td="youtube.com" ;; YT_GV) td="googlevideo.com" ;; RKN) td="rutracker.org" ;; *) td="youtube.com" ;;
+    esac
+
+    local working; working=$(auto_discover_working_strategies "$td" "$nums" "$min_score")
+    [ -z "$working" ] && { print_warning "Рабочих стратегий не найдено"; return 1; }
+
+    local wc; wc=$(echo "$working" | wc -w)
+    print_success "Найдено $wc рабочих стратегий: $working"
+    apply_custom_circular "$category" "$working"
+}
