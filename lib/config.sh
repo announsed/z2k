@@ -102,16 +102,35 @@ EOF
     return 0
 }
 
-# Запустить стандартный скрипт загрузки списков (get_config.sh / get_refilter_domains.sh)
+# Запустить стандартный скрипт загрузки списков
+# При наличии config — через get_config.sh (читает GETLIST из config)
+# Без config (первый запуск при установке) — вызывает get_refilter_domains.sh напрямую
 run_getlist() {
-    local getlist_script="${ZAPRET2_DIR}/ipset/get_config.sh"
-    if [ -x "$getlist_script" ]; then
-        print_info "Запуск $getlist_script..."
-        "$getlist_script"
-    else
-        print_warning "get_config.sh не найден или не исполняемый: $getlist_script"
-        print_info "Списки будут загружены автоматически при первом запуске cron"
+    local ipset_dir="${ZAPRET2_DIR}/ipset"
+    local config_file="${ZAPRET2_DIR}/config"
+
+    # Если config уже есть — штатный путь через get_config.sh
+    if [ -f "$config_file" ] && grep -q "^GETLIST=" "$config_file" 2>/dev/null; then
+        local getlist_script="${ipset_dir}/get_config.sh"
+        if [ -x "$getlist_script" ]; then
+            print_info "Запуск $getlist_script (GETLIST из config)..."
+            "$getlist_script"
+            return $?
+        fi
     fi
+
+    # Fallback: вызвать get_refilter_domains.sh напрямую (установка, config ещё не создан)
+    local refilter_script="${ipset_dir}/get_refilter_domains.sh"
+    if [ -x "$refilter_script" ]; then
+        print_info "Запуск $refilter_script напрямую..."
+        "$refilter_script"
+        return $?
+    fi
+
+    # Ни один скрипт не найден
+    print_warning "Скрипты загрузки списков не найдены в $ipset_dir"
+    print_info "Списки будут загружены автоматически при первом запуске cron"
+    return 1
 }
 
 # Показать статистику по спискам доменов
