@@ -6,8 +6,8 @@
 # КОНСТАНТЫ
 # ==============================================================================
 
-# Версия z2k (основное определение в z2k.sh)
-[ -z "$Z2K_VERSION" ] && Z2K_VERSION="2.0.0"
+# Версия z2k
+Z2K_VERSION="2.0.0"
 
 # Пути установки
 ZAPRET2_DIR="/opt/zapret2"
@@ -26,9 +26,6 @@ export CONFIG_DIR
 export LISTS_DIR
 export Z2K_INIT_SCRIPT
 export INIT_SCRIPT
-export IPSET_DIR
-export HOSTS_USER
-export HOSTS_USER_EXCLUDE
 
 # Рабочая директория
 WORK_DIR="/tmp/z2k"
@@ -36,6 +33,8 @@ LIB_DIR="${WORK_DIR}/lib"
 
 # GitHub URLs
 GITHUB_RAW="https://raw.githubusercontent.com/necronicle/z2k/test"
+Z4R_BASE_URL="https://raw.githubusercontent.com/IndeecFOX/zapret4rocket/master"
+Z4R_LISTS_URL="${Z4R_BASE_URL}/lists"
 
 # Файлы конфигурации
 STRATEGIES_CONF="${CONFIG_DIR}/strategies.conf"
@@ -43,11 +42,7 @@ HTTP_STRATEGIES_CONF="${CONFIG_DIR}/http_strategies.conf"
 CURRENT_STRATEGY_FILE="${CONFIG_DIR}/current_strategy"
 QUIC_STRATEGIES_CONF="${CONFIG_DIR}/quic_strategies.conf"
 QUIC_STRATEGY_FILE="${CONFIG_DIR}/quic_strategy.conf"
-
-# ipset / стандартные списки доменов
-IPSET_DIR="${ZAPRET2_DIR}/ipset"
-HOSTS_USER="${IPSET_DIR}/zapret-hosts-user.txt"
-HOSTS_USER_EXCLUDE="${IPSET_DIR}/zapret-hosts-user-exclude.txt"
+RUTRACKER_QUIC_STRATEGY_FILE="${CONFIG_DIR}/rutracker_quic_strategy.conf"
 
 # Цвета для вывода (если терминал поддерживает)
 if [ -t 1 ]; then

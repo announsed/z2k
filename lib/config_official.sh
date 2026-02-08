@@ -7,70 +7,100 @@
 # ==============================================================================
 
 generate_nfqws2_opt_from_strategies() {
-    # Генерирует 3-профильный NFQWS2_OPT:
-    #   1) TCP autocircular + <HOSTLIST> (autohostlist — все заблокированные домены)
-    #   2) QUIC autocircular + hostlist-domains (только YouTube/Google Video)
-    #   3) Discord UDP — фильтрация по портам + L7 (без hostlist)
+    # Генерирует NFQWS2_OPT для config файла на основе текущих стратегий
 
-    local conf_dir="${CONFIG_DIR:-/opt/etc/zapret2}"
-    local strategies_conf="${conf_dir}/strategies.conf"
-    local quic_strategies_conf="${conf_dir}/quic_strategies.conf"
+    local config_dir="/opt/etc/zapret2"
+    local extra_strats_dir="/opt/zapret2/extra_strats"
+    local lists_dir="/opt/zapret2/lists"
 
-    # --- TCP параметры ---
-    local tcp_raw_params=""
-    local tcp_num
-    tcp_num=$(find_strategy_by_name "manual_autocircular")
-    if [ -n "$tcp_num" ]; then
-        tcp_raw_params=$(get_strategy "$tcp_num")
+    # Загрузить текущие стратегии из категорий
+    local youtube_tcp_tcp=""
+    local youtube_gv_tcp=""
+    local rkn_tcp=""
+    local quic_udp=""
+    local quic_rkn_udp=""
+    local discord_tcp=""
+    local discord_udp=""
+    local custom_tcp=""
+
+    # Прочитать стратегии из файлов категорий
+    if [ -f "${extra_strats_dir}/TCP/YT/Strategy.txt" ]; then
+        youtube_tcp_tcp=$(cat "${extra_strats_dir}/TCP/YT/Strategy.txt")
     fi
-    if [ -z "$tcp_raw_params" ]; then
-        # Fallback: текущая стратегия из current_strategy
-        local cur_file="${conf_dir}/current_strategy"
-        if [ -f "$cur_file" ]; then
-            . "$cur_file"
-            [ -n "$CURRENT_STRATEGY" ] && tcp_raw_params=$(get_strategy "$CURRENT_STRATEGY")
+
+    if [ -f "${extra_strats_dir}/TCP/YT_GV/Strategy.txt" ]; then
+        youtube_gv_tcp=$(cat "${extra_strats_dir}/TCP/YT_GV/Strategy.txt")
+    fi
+
+    if [ -f "${extra_strats_dir}/TCP/RKN/Strategy.txt" ]; then
+        rkn_tcp=$(cat "${extra_strats_dir}/TCP/RKN/Strategy.txt")
+    fi
+
+    if [ -f "${extra_strats_dir}/UDP/YT/Strategy.txt" ]; then
+        quic_udp=$(cat "${extra_strats_dir}/UDP/YT/Strategy.txt")
+    fi
+
+    if [ -f "${extra_strats_dir}/UDP/RUTRACKER/Strategy.txt" ]; then
+        quic_rkn_udp=$(cat "${extra_strats_dir}/UDP/RUTRACKER/Strategy.txt")
+    fi
+
+    # Discord стратегии (обычно фиксированные)
+    discord_tcp="--filter-tcp=443 --filter-l7=tls --payload=tls_client_hello --lua-desync=fake:blob=tls_clienthello_14:tls_mod=rnd,dupsid:ip_autottl=-2,3-20 --lua-desync=multisplit:pos=sld+1"
+    discord_udp="--filter-udp=50000-50099,1400,3478-3481,5349 --filter-l7=discord,stun --payload=stun,discord_ip_discovery --out-range=-n10 --lua-desync=fake:blob=0x00000000000000000000000000000000:repeats=2"
+
+    # Дефолтная стратегия если не загружена
+    local default_strategy="--filter-tcp=443 --filter-l7=tls --payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:repeats=6"
+
+    # Использовать дефолт если стратегия пустая
+    [ -z "$youtube_tcp_tcp" ] && youtube_tcp_tcp="$default_strategy"
+    [ -z "$youtube_gv_tcp" ] && youtube_gv_tcp="$default_strategy"
+    [ -z "$rkn_tcp" ] && rkn_tcp="$default_strategy"
+    [ -z "$quic_udp" ] && quic_udp="--filter-udp=443 --filter-l7=quic --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
+    [ -z "$quic_rkn_udp" ] && quic_rkn_udp="--filter-udp=443 --filter-l7=quic --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
+    custom_tcp="$default_strategy"
+
+    # Генерировать NFQWS2_OPT в формате официального config
+    # ������������ NFQWS2_OPT � ������� ������������ config
+    local nfqws2_opt_lines=""
+
+    # Helper: �������� ������ ���� hostlist ���������� � �� ������
+    add_hostlist_line() {
+        local list_path="$1"
+        shift
+        if [ -s "$list_path" ]; then
+            nfqws2_opt_lines="$nfqws2_opt_lines$*\\n"
+        else
+            echo "WARN: hostlist file missing or empty: $list_path (skip profile)" 1>&2
         fi
-    fi
-    if [ -z "$tcp_raw_params" ]; then
-        tcp_raw_params="--lua-desync=fake:blob=fake_default_tls:repeats=6"
-    fi
-    local tcp_full_params
-    tcp_full_params=$(build_tls_profile_params "$tcp_raw_params")
+    }
 
-    # --- QUIC параметры (только YouTube / Google Video) ---
-    local quic_raw_params=""
-    local quic_num
-    quic_num=$(find_quic_strategy_by_name "yt_quic_autocircular")
-    if [ -n "$quic_num" ]; then
-        quic_raw_params=$(get_quic_strategy "$quic_num" 2>/dev/null)
-    fi
-    if [ -z "$quic_raw_params" ]; then
-        quic_raw_params=$(get_current_quic_profile_params 2>/dev/null)
-    fi
-    if [ -z "$quic_raw_params" ]; then
-        quic_raw_params="--filter-udp=443 --filter-l7=quic --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
-    fi
-    local quic_full_params
-    quic_full_params=$(build_quic_profile_params "$quic_raw_params")
+    # RKN TCP
+    add_hostlist_line "${extra_strats_dir}/TCP/RKN/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/TCP/RKN/List.txt $rkn_tcp <HOSTLIST> --new"
 
-    # Домены YouTube/Google Video для QUIC профиля
-    local yt_quic_domains="youtube.com,youtu.be,googlevideo.com,ytimg.com,ggpht.com,googleapis.com,gstatic.com,googleusercontent.com"
+    # YouTube TCP
+    add_hostlist_line "${extra_strats_dir}/TCP/YT/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/TCP/YT/List.txt $youtube_tcp_tcp <HOSTLIST> --new"
 
-    # --- Discord UDP параметры ---
-    # Фильтрация только по портам и L7-протоколу (discord/stun).
-    # --hostlist-domains тут НЕ ИСПОЛЬЗУЕТСЯ: STUN/Discord UDP не содержат hostname,
-    # и профиль с hostlist никогда не выберется (мануал: "never selected if hostname missing").
-    local discord_udp_params="--filter-udp=50000-50099,1400,3478-3481,5349 --filter-l7=discord,stun --payload=stun,discord_ip_discovery --out-range=-n10 --lua-desync=fake:blob=0x00000000000000000000000000000000:repeats=2"
+    # YouTube GV (domains list �������)
+    nfqws2_opt_lines="$nfqws2_opt_lines--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist-domains=googlevideo.com $youtube_gv_tcp <HOSTLIST> --new\\n"
 
-    # --- Собрать NFQWS2_OPT (3 профиля) ---
-    # Профиль 1: TCP — все домены через autohostlist (<HOSTLIST>)
-    # Профиль 2: QUIC — только YouTube/GV через hostlist-domains (QUIC Initial содержит SNI)
-    # Профиль 3: Discord UDP — голос/видео, фильтрация по портам + L7 (без hostlist)
+    # QUIC YT
+    add_hostlist_line "${extra_strats_dir}/UDP/YT/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/UDP/YT/List.txt $quic_udp <HOSTLIST_NOAUTO> --new"
+
+    # QUIC RUTRACKER (disabled)
+    : # disabled by default
+
+    # Discord TCP/UDP
+    add_hostlist_line "${lists_dir}/discord.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${lists_dir}/discord.txt $discord_tcp <HOSTLIST> --new"
+    add_hostlist_line "${lists_dir}/discord.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${lists_dir}/discord.txt $discord_udp <HOSTLIST_NOAUTO> --new"
+
+    # Custom TCP
+    add_hostlist_line "${lists_dir}/custom.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${lists_dir}/custom.txt $custom_tcp <HOSTLIST>"
+
+    local nfqws2_opt_value
+    nfqws2_opt_value=$(printf "%b" "$nfqws2_opt_lines" | sed '/^$/d')
     cat <<NFQWS2_OPT
 NFQWS2_OPT="
-${tcp_full_params} <HOSTLIST> --new
-${quic_full_params} --hostlist-domains=${yt_quic_domains} --new
-${discord_udp_params}
+$nfqws2_opt_value
 "
 NFQWS2_OPT
 }
@@ -97,9 +127,8 @@ create_official_config() {
     # =========================================================================
     print_info "Валидация сгенерированных опций nfqws2..."
 
-    # Извлечь NFQWS2_OPT из сгенерированной секции (многострочное значение)
-    local nfqws2_opt_value
-    nfqws2_opt_value=$(echo "$nfqws2_opt_section" | sed -n '/^NFQWS2_OPT="/,/^"/{/^NFQWS2_OPT="/d;/^"$/d;p;}')
+    # Извлечь NFQWS2_OPT из сгенерированной секции
+    local nfqws2_opt_value=$(echo "$nfqws2_opt_section" | grep "^NFQWS2_OPT=" | sed 's/^NFQWS2_OPT=//' | tr -d '"')
 
     # Загрузить модули для dry_run_nfqws()
     if [ -f "/opt/zapret2/common/base.sh" ]; then
@@ -188,11 +217,8 @@ create_official_config() {
 ENABLED=1
 
 # Mode filter: none, ipset, hostlist, autohostlist
-# autohostlist = self-learning mode (detects blocked domains via retransmissions/RST/timeouts)
+# For z2k we use hostlist mode with multi-profile filtering
 MODE_FILTER=autohostlist
-
-# Script for downloading curated domain lists (run by cron and init)
-GETLIST=get_refilter_domains.sh
 
 # Firewall type - AUTO-DETECTED by init script, DO NOT set manually
 # Init script calls linux_fwtype() which detects iptables/nftables automatically
@@ -222,13 +248,13 @@ NFQWS2_UDP_PKT_OUT="5"
 NFQWS2_UDP_PKT_IN=""
 
 # ==============================================================================
-# NFQWS2 OPTIONS (3-PROFILE MODE)
+# NFQWS2 OPTIONS (MULTI-PROFILE MODE)
 # ==============================================================================
-# Auto-generated from z2k strategy database
-# Profile 1: TCP autocircular (all blocked domains) + <HOSTLIST> + --out-range for CPU savings
-# Profile 2: QUIC autocircular (YouTube/Google Video only) + --hostlist-domains
-# Profile 3: Discord UDP (STUN/voice) — filtered by ports + L7 only (no hostlist)
-# <HOSTLIST> expanded by init script based on MODE_FILTER (autohostlist)
+# This section is auto-generated from z2k strategy database
+# Each --new separator creates independent profile with own filters and strategy
+# Order: RKN TCP → YouTube TCP → YouTube GV → QUIC YT → QUIC RKN → Discord TCP → Discord UDP → Custom
+# Placeholders: <HOSTLIST> and <HOSTLIST_NOAUTO> are expanded based on MODE_FILTER
+# This enables standard hostlists and autohostlist like upstream zapret2
 CONFIG
 
     # Добавить сгенерированный NFQWS2_OPT
@@ -253,10 +279,7 @@ INIT_APPLY_FW=1
 
 # Flow offloading mode: none, software, hardware, donttouch
 # Set during installation based on system detection
-CONFIG
-    echo "FLOWOFFLOAD=$flowoffload_value" >> "$config_file"
-
-    cat >> "$config_file" <<'CONFIG'
+FLOWOFFLOAD=$flowoffload_value
 
 # WAN interface override (space/comma separated). Empty = auto-detect
 #WAN_IFACE=

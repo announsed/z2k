@@ -33,8 +33,29 @@ MENU
 
         if is_zapret2_installed; then
             printf " Сервис: %s\n" "$(get_service_status)"
-            printf " TCP стратегия: #%s\n" "$(get_current_strategy)"
-            printf " QUIC стратегия: #%s\n" "$(get_current_quic_strategy)"
+
+            # Проверить режим стратегий
+            if [ -f "$CATEGORY_STRATEGIES_CONF" ]; then
+                local count
+                count=$(grep -c ":" "$CATEGORY_STRATEGIES_CONF" 2>/dev/null || echo 0)
+                printf " Стратегии: %s категорий\n" "$count"
+            else
+                printf " Текущая стратегия: #%s\n" "$(get_current_strategy)"
+            fi
+
+            # Проверить режим ALL TCP-443
+            local all_tcp443_conf="${CONFIG_DIR}/all_tcp443.conf"
+            if [ -f "$all_tcp443_conf" ]; then
+                . "$all_tcp443_conf"
+                if [ "$ENABLED" = "1" ]; then
+                    printf " ALL TCP-443: Включен (стратегия #%s)\n" "$STRATEGY"
+                fi
+            fi
+
+            # Статус QUIC RuTracker
+            if is_rutracker_quic_enabled; then
+                printf " RuTracker QUIC: Включен\n"
+            fi
         fi
 
         cat <<'MENU'
@@ -43,21 +64,17 @@ MENU
 [2] Выбрать стратегию по номеру
 [3] Автотест стратегий
 [4] Управление сервисом
-[5] Просмотр текущих стратегий
 [6] Обновить списки доменов
-[7] Настройка Discord
 [8] Резервная копия/Восстановление
 [9] Удалить zapret2
 [A] Режим ALL TCP-443 (без хостлистов)
-[C] Конструктор circular (автоперебор)
 [Q] Настройки QUIC
 [W] Whitelist (исключения)
 [0] Выход
 
 MENU
 
-        printf "Выберите опцию [0-9,A,C,Q,W]: "
-
+        printf "Выберите опцию [0-9,A,Q,W]: "
         read_input choice
 
         case "$choice" in
@@ -73,14 +90,8 @@ MENU
             4)
                 menu_service_control
                 ;;
-            5)
-                menu_view_strategy
-                ;;
             6)
                 menu_update_lists
-                ;;
-            7)
-                menu_discord
                 ;;
             8)
                 menu_backup_restore
@@ -90,9 +101,6 @@ MENU
                 ;;
             a|A)
                 menu_all_tcp443
-                ;;
-            c|C)
-                menu_circular_builder
                 ;;
             q|Q)
                 menu_quic_settings
@@ -146,7 +154,7 @@ menu_install() {
 
 menu_select_strategy() {
     clear_screen
-    print_header "[2] Выбор стратегии"
+    print_header "[2] Выбор стратегии по категориям"
 
     if ! is_zapret2_installed; then
         print_error "zapret2 не установлен"
@@ -157,19 +165,41 @@ menu_select_strategy() {
 
     local total_count
     total_count=$(get_strategies_count)
-    local current_tcp
-    current_tcp=$(get_current_strategy)
+    # Прочитать текущие стратегии
+    local config_file="${CONFIG_DIR}/category_strategies.conf"
+    local current_yt_tcp="1"
+    local current_yt_gv="1"
+    local current_rkn="1"
 
-    print_info "Всего TCP стратегий: $total_count"
-    printf "  Текущая TCP: #%s\n" "$current_tcp"
-    printf "  Текущая QUIC: #%s\n" "$(get_current_quic_strategy)"
+    if [ -f "$config_file" ]; then
+        current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        [ -z "$current_yt_tcp" ] && current_yt_tcp="1"
+        [ -z "$current_yt_gv" ] && current_yt_gv="1"
+        [ -z "$current_rkn" ] && current_rkn="1"
+    fi
+
+    print_info "Всего доступно стратегий: $total_count"
+    print_separator
+    print_info "Текущие стратегии:"
+    printf "  YouTube TCP: #%s\n" "$current_yt_tcp"
+    printf "  YouTube GV:  #%s\n" "$current_yt_gv"
+    printf "  RKN:         #%s\n" "$current_rkn"
+    printf "  QUIC YouTube:    #%s\n" "$(get_current_quic_strategy)"
+    printf "  QUIC RuTracker:  #%s\n" "$(get_rutracker_quic_strategy)"
     print_separator
 
+    # Подменю выбора категории
     cat <<'SUBMENU'
 
-[1] Выбрать TCP стратегию (для всех доменов)
-[2] Выбрать QUIC стратегию (YouTube UDP)
-[3] Применить autocircular (рекомендуется)
+Выберите категорию для изменения стратегии:
+[1] YouTube TCP (youtube.com)
+[2] YouTube GV (googlevideo CDN)
+[3] RKN (заблокированные сайты)
+[4] QUIC (UDP 443)
+[5] Все категории сразу
+[6] Уровень агрессивности (soft/medium/aggressive)
 [B] Назад
 
 SUBMENU
@@ -178,41 +208,120 @@ SUBMENU
 
     case "$category_choice" in
         1)
-            # TCP стратегия
-            menu_select_single_strategy "TCP" "$current_tcp" "$total_count"
+            # YouTube TCP
+            menu_select_single_strategy "YouTube TCP" "$current_yt_tcp" "$total_count"
             if [ $? -eq 0 ] && [ -n "$SELECTED_STRATEGY" ]; then
                 local new_strategy="$SELECTED_STRATEGY"
                 print_separator
-                print_info "Применяю стратегию #$new_strategy..."
-                apply_strategy_simple "$new_strategy"
+                print_info "Применяю стратегию #$new_strategy для тестирования..."
+                apply_category_strategies_v2 "$new_strategy" "$current_yt_gv" "$current_rkn"
                 print_separator
-                test_category_availability "TCP" "youtube.com"
+                test_category_availability "YouTube TCP" "youtube.com"
                 print_separator
 
-                printf "Оставить эту стратегию? [Y/n]: "
+                printf "Применить эту стратегию постоянно? [Y/n]: "
                 read_input apply_confirm
                 case "$apply_confirm" in
                     [Nn]|[Nn][Oo])
-                        print_info "Откатываю к стратегии #$current_tcp..."
-                        apply_strategy_simple "$current_tcp"
+                        print_info "Откатываю к предыдущей стратегии #$current_yt_tcp..."
+                        apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
                         print_success "Откат выполнен"
                         ;;
                     *)
-                        print_success "Стратегия #$new_strategy применена"
+                        save_category_strategies "$new_strategy" "$current_yt_gv" "$current_rkn"
+                        apply_category_strategies_v2 "$new_strategy" "$current_yt_gv" "$current_rkn"
+                        print_success "Стратегия YouTube TCP применена постоянно!"
                         ;;
                 esac
             fi
-            pause
             return
             ;;
         2)
-            # QUIC
-            menu_select_quic_strategy
+            # YouTube GV
+            menu_select_single_strategy "YouTube GV" "$current_yt_gv" "$total_count"
+            if [ $? -eq 0 ] && [ -n "$SELECTED_STRATEGY" ]; then
+                local new_strategy="$SELECTED_STRATEGY"
+                print_separator
+                print_info "Применяю стратегию #$new_strategy для тестирования..."
+                apply_category_strategies_v2 "$current_yt_tcp" "$new_strategy" "$current_rkn"
+                print_separator
+                local gv_domain
+                gv_domain=$(generate_gv_domain)
+                test_category_availability "YouTube GV" "$gv_domain"
+                print_separator
+
+                printf "Применить эту стратегию постоянно? [Y/n]: "
+                read_input apply_confirm
+                case "$apply_confirm" in
+                    [Nn]|[Nn][Oo])
+                        print_info "Откатываю к предыдущей стратегии #$current_yt_gv..."
+                        apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
+                        print_success "Откат выполнен"
+                        ;;
+                    *)
+                        save_category_strategies "$current_yt_tcp" "$new_strategy" "$current_rkn"
+                        apply_category_strategies_v2 "$current_yt_tcp" "$new_strategy" "$current_rkn"
+                        print_success "Стратегия YouTube GV применена постоянно!"
+                        ;;
+                esac
+            fi
             return
             ;;
         3)
-            # Autocircular
-            apply_autocircular_strategies
+            # RKN
+            menu_select_single_strategy "RKN" "$current_rkn" "$total_count"
+            if [ $? -eq 0 ] && [ -n "$SELECTED_STRATEGY" ]; then
+                local new_strategy="$SELECTED_STRATEGY"
+                print_separator
+                print_info "Применяю стратегию #$new_strategy для тестирования..."
+                apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$new_strategy"
+                print_separator
+                test_category_availability_rkn
+                print_separator
+
+                printf "Применить эту стратегию постоянно? [Y/n]: "
+                read_input apply_confirm
+                case "$apply_confirm" in
+                    [Nn]|[Nn][Oo])
+                        print_info "Откатываю к предыдущей стратегии #$current_rkn..."
+                        apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
+                        print_success "Откат выполнен"
+                        ;;
+                    *)
+                        save_category_strategies "$current_yt_tcp" "$current_yt_gv" "$new_strategy"
+                        apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$new_strategy"
+                        print_success "Стратегия RKN применена постоянно!"
+                        ;;
+                esac
+            fi
+            return
+            ;;
+        4)
+            # QUIC (UDP 443)
+            menu_select_quic_strategy
+            return
+            ;;
+        5)
+            # Все категории
+            menu_select_all_strategies "$total_count"
+            pause
+            return
+            ;;
+        6)
+            print_separator
+            print_info "Выберите уровень агрессивности:"
+            printf "  [1] Мягкий (soft)     -> TCP #1/#4/#7, QUIC #1\n"
+            printf "  [2] Средний (medium)  -> TCP #2/#5/#8, QUIC #2\n"
+            printf "  [3] Агрессивный (hard)-> TCP #3/#6/#9, QUIC #3\n"
+            printf "Ваш выбор [1/2/3]: "
+            read_input tier_choice
+
+            case "$tier_choice" in
+                1) apply_default_strategies ;;
+                2) apply_medium_strategies ;;
+                3) apply_new_default_strategies ;;
+                *) print_warning "Неверный выбор уровня" ;;
+            esac
             pause
             return
             ;;
@@ -242,6 +351,29 @@ test_category_availability() {
         print_success "[OK] $category_name доступен! Стратегия работает."
     else
         print_error "[FAIL] $category_name недоступен. Попробуйте другую стратегию."
+        print_info "Рекомендация: запустите автотест [3] для поиска рабочей стратегии"
+    fi
+}
+
+# Вспомогательная функция: проверка доступности RKN (3 домена)
+test_category_availability_rkn() {
+    local test_domains="meduza.io facebook.com rutracker.org"
+    local success_count=0
+
+    print_info "Проверка доступности: RKN (meduza.io, facebook.com, rutracker.org)..."
+
+    sleep 2
+
+    for domain in $test_domains; do
+        if test_strategy_tls "$domain" 5; then
+            success_count=$((success_count + 1))
+        fi
+    done
+
+    if [ "$success_count" -ge 2 ]; then
+        print_success "[OK] RKN доступен! Стратегия работает. (${success_count}/3)"
+    else
+        print_error "[FAIL] RKN недоступен. Попробуйте другую стратегию. (${success_count}/3)"
         print_info "Рекомендация: запустите автотест [3] для поиска рабочей стратегии"
     fi
 }
@@ -300,6 +432,26 @@ menu_select_single_strategy() {
     done
 }
 
+# Применить текущие стратегии категорий (YouTube TCP/GV/RKN)
+apply_current_category_strategies() {
+    local config_file="${CONFIG_DIR}/category_strategies.conf"
+    local current_yt_tcp="1"
+    local current_yt_gv="1"
+    local current_rkn="1"
+
+    if [ -f "$config_file" ]; then
+        current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        [ -z "$current_yt_tcp" ] && current_yt_tcp="1"
+        [ -z "$current_yt_gv" ] && current_yt_gv="1"
+        [ -z "$current_rkn" ] && current_rkn="1"
+    fi
+
+    print_info "Применяю текущие стратегии категорий..."
+    apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
+}
+
 # Вспомогательная функция: выбор стратегии QUIC (UDP 443)
 menu_select_quic_strategy() {
     clear_screen
@@ -319,68 +471,224 @@ menu_select_quic_strategy() {
         return
     fi
 
-    local current_quic
-    current_quic=$(get_current_quic_strategy)
-
     printf "\n"
     print_info "Всего QUIC стратегий: $total_quic"
-    printf "Текущая YouTube QUIC стратегия: #%s\n\n" "$current_quic"
+    printf "Текущие QUIC стратегии:\n"
+    printf "  YouTube:    #%s\n" "$(get_current_quic_strategy)"
+    printf "  RuTracker:  #%s\n\n" "$(get_rutracker_quic_strategy)"
 
-    printf "Введите номер QUIC стратегии [1-%s] или Enter для отмены: " "$total_quic"
-    read_input new_strategy
+    while true; do
+        printf "Выберите категорию QUIC:\n"
+        printf "[1] YouTube QUIC\n"
+        printf "[2] RuTracker QUIC\n"
+        printf "[B] Назад\n\n"
+        printf "Ваш выбор: "
+        read_input quic_choice
 
-    if [ -z "$new_strategy" ]; then
-        print_info "Отменено"
-        pause
-        return
-    fi
+        case "$quic_choice" in
+            1)
+                local category_name="YouTube QUIC"
+                local current_quic
+                current_quic=$(get_current_quic_strategy)
+                ;;
+            2)
+                local category_name="RuTracker QUIC"
+                local current_quic
+                current_quic=$(get_rutracker_quic_strategy)
+                ;;
+            [Bb])
+                return
+                ;;
+            *)
+                print_error "Неверный выбор"
+                continue
+                ;;
+        esac
 
-    if ! echo "$new_strategy" | grep -qE '^[0-9]+$'; then
-        print_error "Неверный формат номера"
-        pause
-        return
-    fi
+        printf "\nТекущая QUIC стратегия: #%s\n" "$current_quic"
+        printf "Введите номер QUIC стратегии [1-%s] или Enter для отмены: " "$total_quic"
+        read_input new_strategy
 
-    if [ "$new_strategy" -lt 1 ] || [ "$new_strategy" -gt "$total_quic" ]; then
-        print_error "Номер вне диапазона"
-        pause
-        return
-    fi
+        if [ -z "$new_strategy" ]; then
+            print_info "Отменено"
+            return
+        fi
 
-    if ! quic_strategy_exists "$new_strategy"; then
-        print_error "QUIC стратегия #$new_strategy не найдена"
-        pause
-        return
-    fi
+        if ! echo "$new_strategy" | grep -qE '^[0-9]+$'; then
+            print_error "Неверный формат номера"
+            continue
+        fi
 
-    local name
-    local desc
-    local params
-    name=$(get_quic_strategy_name "$new_strategy")
-    desc=$(get_quic_strategy_desc "$new_strategy")
-    params=$(get_quic_strategy "$new_strategy")
+        if [ "$new_strategy" -lt 1 ] || [ "$new_strategy" -gt "$total_quic" ]; then
+            print_error "Номер вне диапазона"
+            continue
+        fi
 
-    print_info "Выбрана QUIC стратегия #$new_strategy (${name})"
-    [ -n "$desc" ] && printf "  %s\n" "$desc"
-    printf "  %s\n\n" "$params"
+        if ! quic_strategy_exists "$new_strategy"; then
+            print_error "QUIC стратегия #$new_strategy не найдена"
+            continue
+        fi
 
-    printf "Применить эту QUIC стратегию? [Y/n]: "
-    read_input apply_confirm
-    case "$apply_confirm" in
+        local name
+        local desc
+        local params
+        name=$(get_quic_strategy_name "$new_strategy")
+        desc=$(get_quic_strategy_desc "$new_strategy")
+        params=$(get_quic_strategy "$new_strategy")
+
+        print_info "Выбрана QUIC стратегия #$new_strategy (${name})"
+        [ -n "$desc" ] && printf "  %s\n" "$desc"
+        printf "  %s\n\n" "$params"
+
+        printf "Применить эту QUIC стратегию для %s? [Y/n]: " "$category_name"
+        read_input apply_confirm
+        case "$apply_confirm" in
+            [Nn]|[Nn][Oo])
+                print_info "Отменено"
+                return
+                ;;
+            *)
+                if [ "$quic_choice" = "1" ]; then
+                    set_current_quic_strategy "$new_strategy"
+                else
+                    set_rutracker_quic_strategy "$new_strategy"
+                fi
+                apply_current_category_strategies
+                print_success "QUIC стратегия применена"
+                pause
+                return
+                ;;
+        esac
+    done
+}
+
+# Вспомогательная функция: выбор стратегий для всех категорий
+menu_select_all_strategies() {
+    local total_count=$1
+
+    printf "\n"
+    print_info "Выбор стратегий для всех категорий:"
+    printf "\n"
+
+    # YouTube TCP
+    local yt_tcp_strategy
+    while true; do
+        printf "YouTube TCP [1-%s]: " "$total_count"
+        read_input yt_tcp_strategy
+
+        if ! echo "$yt_tcp_strategy" | grep -qE '^[0-9]+$'; then
+            print_error "Неверный формат"
+            continue
+        fi
+
+        if [ "$yt_tcp_strategy" -lt 1 ] || [ "$yt_tcp_strategy" -gt "$total_count" ]; then
+            print_error "Номер вне диапазона"
+            continue
+        fi
+
+        if ! strategy_exists "$yt_tcp_strategy"; then
+            print_error "Стратегия не найдена"
+            continue
+        fi
+
+        break
+    done
+
+    # YouTube GV
+    local yt_gv_strategy
+    while true; do
+        printf "YouTube GV [1-%s, Enter=использовать %s]: " "$total_count" "$yt_tcp_strategy"
+        read_input yt_gv_strategy
+
+        if [ -z "$yt_gv_strategy" ]; then
+            yt_gv_strategy="$yt_tcp_strategy"
+            print_info "Используется: #$yt_gv_strategy"
+            break
+        fi
+
+        if ! echo "$yt_gv_strategy" | grep -qE '^[0-9]+$'; then
+            print_error "Неверный формат"
+            continue
+        fi
+
+        if [ "$yt_gv_strategy" -lt 1 ] || [ "$yt_gv_strategy" -gt "$total_count" ]; then
+            print_error "Номер вне диапазона"
+            continue
+        fi
+
+        if ! strategy_exists "$yt_gv_strategy"; then
+            print_error "Стратегия не найдена"
+            continue
+        fi
+
+        break
+    done
+
+    # RKN
+    local rkn_strategy
+    while true; do
+        printf "RKN [1-%s, Enter=использовать %s]: " "$total_count" "$yt_tcp_strategy"
+        read_input rkn_strategy
+
+        if [ -z "$rkn_strategy" ]; then
+            rkn_strategy="$yt_tcp_strategy"
+            print_info "Используется: #$rkn_strategy"
+            break
+        fi
+
+        if ! echo "$rkn_strategy" | grep -qE '^[0-9]+$'; then
+            print_error "Неверный формат"
+            continue
+        fi
+
+        if [ "$rkn_strategy" -lt 1 ] || [ "$rkn_strategy" -gt "$total_count" ]; then
+            print_error "Номер вне диапазона"
+            continue
+        fi
+
+        if ! strategy_exists "$rkn_strategy"; then
+            print_error "Стратегия не найдена"
+            continue
+        fi
+
+        break
+    done
+
+    # Итоговая таблица
+    printf "\n"
+    print_separator
+    printf "%-20s | %s\n" "Категория" "Стратегия"
+    print_separator
+    printf "%-20s | #%s\n" "YouTube TCP" "$yt_tcp_strategy"
+    printf "%-20s | #%s\n" "YouTube GV" "$yt_gv_strategy"
+    printf "%-20s | #%s\n" "RKN" "$rkn_strategy"
+    print_separator
+
+    printf "\nПрименить? [Y/n]: "
+    read_input answer
+
+    case "$answer" in
         [Nn]|[Nn][Oo])
             print_info "Отменено"
             ;;
         *)
-            set_current_quic_strategy "$new_strategy"
-            # Обновить config и перезапустить
-            . "${LIB_DIR}/config_official.sh"
-            update_nfqws2_opt_in_config "${ZAPRET2_DIR}/config"
-            local init_script="${Z2K_INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
-            [ -f "$init_script" ] && "$init_script" restart >/dev/null 2>&1
-            print_success "QUIC стратегия применена"
+            save_category_strategies "$yt_tcp_strategy" "$yt_gv_strategy" "$rkn_strategy"
+            apply_category_strategies_v2 "$yt_tcp_strategy" "$yt_gv_strategy" "$rkn_strategy"
+            print_success "Все стратегии применены!"
+            print_separator
+
+            # Автопроверка всех категорий
+            print_info "Запуск проверки доступности..."
+            print_separator
+            test_category_availability "YouTube TCP" "youtube.com"
+            print_separator
+            local gv_domain
+            gv_domain=$(generate_gv_domain)
+            test_category_availability "YouTube GV" "$gv_domain"
+            print_separator
+            test_category_availability_rkn
             ;;
     esac
-    pause
 }
 
 # ==============================================================================
@@ -404,10 +712,11 @@ menu_autotest() {
     fi
 
     printf "Режимы тестирования:\n\n"
-    printf "[1] Быстрый тест (топ стратегий, ~2-3 мин)\n"
-    printf "[2] Диапазон (укажите вручную)\n"
-    printf "[3] Все стратегии (только HTTPS, %s шт, ~15 мин)\n" "$total_count"
-    printf "[4] QUIC тест (UDP 443, ~5-10 мин)\n"
+    printf "[1] По категориям Z4R (YouTube TCP/GV + RKN, ~8-10 мин)\n"
+    printf "[2] Общий тест (все стратегии, ~2-3 мин)\n"
+    printf "[3] Диапазон (укажите вручную)\n"
+    printf "[4] Все стратегии (только HTTPS, %s шт, ~15 мин)\n" "$total_count"
+    printf "[5] QUIC тест (UDP 443, ~5-10 мин)\n"
     printf "[B] Назад\n\n"
 
     printf "Выберите режим: "
@@ -416,9 +725,16 @@ menu_autotest() {
     case "$test_mode" in
         1)
             clear_screen
-            auto_test_top20
+            print_info "Автотест по категориям Z4R (YouTube TCP, YouTube GV, RKN)"
+            if confirm "Начать тестирование?" "Y"; then
+                auto_test_categories
+            fi
             ;;
         2)
+            clear_screen
+            auto_test_top20
+            ;;
+        3)
             printf "\nНачало диапазона: "
             read_input start_range
             printf "Конец диапазона: "
@@ -431,7 +747,7 @@ menu_autotest() {
                 print_error "Неверный диапазон"
             fi
             ;;
-        3)
+        4)
             clear_screen
             print_warning "Это займет около 15 минут!"
             if confirm "Продолжить?" "N"; then
@@ -445,7 +761,7 @@ menu_autotest() {
                 test_strategy_range 1 "$total_count"
             fi
             ;;
-        4)
+        5)
             clear_screen
             auto_test_quic
             ;;
@@ -479,9 +795,6 @@ menu_service_control() {
 [2] Остановить сервис
 [3] Перезапустить сервис
 [4] Статус сервиса
-[5] Состояние circular (SIGUSR2)
-[6] Conntrack пул (SIGUSR1)
-[7] Логи nfqws2
 [B] Назад
 
 SUBMENU
@@ -504,15 +817,6 @@ SUBMENU
             ;;
         4)
             "$INIT_SCRIPT" status
-            ;;
-        5)
-            show_circular_state
-            ;;
-        6)
-            show_conntrack_pool
-            ;;
-        7)
-            show_nfqws2_logs
             ;;
         [Bb])
             return
@@ -539,36 +843,47 @@ menu_view_strategy() {
         return
     fi
 
-    local current
-    current=$(get_current_strategy)
+    # Проверить наличие файла с категориями
+    if [ -f "$CATEGORY_STRATEGIES_CONF" ]; then
+        print_info "Стратегии по категориям:"
+        print_separator
 
-    if [ "$current" = "не задана" ] || [ -z "$current" ]; then
-        print_warning "TCP стратегия не выбрана"
-        print_info "Используется стратегия по умолчанию"
+        # Прочитать и показать стратегии для каждой категории
+        while IFS=':' read -r category strategy score; do
+            [ -z "$category" ] && continue
+
+            local params
+            local type
+            params=$(get_strategy "$strategy" 2>/dev/null)
+            type=$(get_strategy_type "$strategy" 2>/dev/null)
+
+            printf "\n[%s]\n" "$(echo "$category" | tr '[:lower:]' '[:upper:]')"
+            printf "  Стратегия: #%s (оценка: %s/5)\n" "$strategy" "$score"
+            printf "  Тип: %s\n" "$type"
+        done < "$CATEGORY_STRATEGIES_CONF"
+
+        print_separator
     else
-        print_info "TCP стратегия: #$current"
-        print_separator
+        # Старый режим - одна стратегия
+        local current
+        current=$(get_current_strategy)
 
-        local params
-        params=$(get_strategy "$current")
-        local type
-        type=$(get_strategy_type "$current")
+        if [ "$current" = "не задана" ] || [ -z "$current" ]; then
+            print_warning "Стратегия не выбрана"
+            print_info "Используется стратегия по умолчанию из init скрипта"
+        else
+            print_info "Текущая стратегия: #$current"
+            print_separator
 
-        printf "Тип: %s\n\n" "$type"
-        printf "Параметры:\n%s\n" "$params"
-        print_separator
-    fi
+            local params
+            params=$(get_strategy "$current")
+            local type
+            type=$(get_strategy_type "$current")
 
-    # QUIC стратегия
-    local current_quic
-    current_quic=$(get_current_quic_strategy)
-    if [ -n "$current_quic" ] && [ "$current_quic" != "не задана" ]; then
-        local quic_name quic_params
-        quic_name=$(get_quic_strategy_name "$current_quic" 2>/dev/null)
-        quic_params=$(get_quic_strategy "$current_quic" 2>/dev/null)
-        printf "\nQUIC стратегия: #%s (%s)\n" "$current_quic" "$quic_name"
-        printf "Параметры:\n%s\n" "$quic_params"
-        print_separator
+            printf "Тип: %s\n\n" "$type"
+            printf "Параметры:\n%s\n" "$params"
+            print_separator
+        fi
     fi
 
     # Показать статус сервиса
@@ -587,88 +902,31 @@ menu_view_strategy() {
 # ==============================================================================
 
 menu_update_lists() {
+    clear_screen
+    print_header "[6] Обновление списков доменов"
+
     if ! is_zapret2_installed; then
         print_error "zapret2 не установлен"
         pause
         return
     fi
 
-    while true; do
-        clear_screen
-        print_header "[6] Управление списками доменов"
+    # Показать текущие списки
+    show_domain_lists_stats
 
-        # Показать текущие списки
-        show_domain_lists_stats
+    printf "\nОбновить списки из zapret4rocket? [Y/n]: "
+    read_input answer
 
-        cat <<'SUBMENU'
+    case "$answer" in
+        [Nn]|[Nn][Oo])
+            print_info "Отменено"
+            ;;
+        *)
+            update_domain_lists
+            ;;
+    esac
 
-[1] Обновить списки (скачать Re:filter)
-[2] Просмотреть пользовательские домены
-[3] Добавить домен
-[4] Удалить домен
-[5] Пересоздать seed-списки
-[B] Назад
-
-SUBMENU
-        printf "Выберите опцию [1-5,B]: "
-        read_input sub_choice
-
-        case "$sub_choice" in
-            1)
-                print_info "Загрузка списков доменов..."
-                run_getlist
-                print_separator
-                show_domain_lists_stats
-                pause
-                ;;
-            2)
-                show_custom_domains
-                pause
-                ;;
-            3)
-                printf "Введите домен (например: example.com): "
-                read_input new_domain
-                if [ -n "$new_domain" ]; then
-                    add_custom_domain "$new_domain"
-                else
-                    print_info "Отменено"
-                fi
-                pause
-                ;;
-            4)
-                printf "Введите домен для удаления: "
-                read_input del_domain
-                if [ -n "$del_domain" ]; then
-                    remove_custom_domain "$del_domain"
-                else
-                    print_info "Отменено"
-                fi
-                pause
-                ;;
-            5)
-                print_warning "Это пересоздаст seed-списки (пользовательские домены сохранятся)"
-                printf "Продолжить? [y/N]: "
-                read_input confirm
-                case "$confirm" in
-                    [Yy])
-                        seed_standard_lists
-                        print_success "Seed-списки пересозданы"
-                        ;;
-                    *)
-                        print_info "Отменено"
-                        ;;
-                esac
-                pause
-                ;;
-            b|B)
-                return
-                ;;
-            *)
-                print_error "Неверный выбор: $sub_choice"
-                pause
-                ;;
-        esac
-    done
+    pause
 }
 
 # ==============================================================================
@@ -935,7 +1193,7 @@ menu_whitelist() {
     clear_screen
     print_header "Whitelist - Исключения из обработки"
 
-    local whitelist_file="${HOSTS_USER_EXCLUDE:-${IPSET_DIR}/zapret-hosts-user-exclude.txt}"
+    local whitelist_file="${LISTS_DIR}/whitelist.txt"
 
     # Проверить существование файла
     if [ ! -f "$whitelist_file" ]; then
@@ -943,8 +1201,8 @@ menu_whitelist() {
         print_info "Создаю файл..."
 
         # Создать директорию если не существует
-        if ! mkdir -p "$(dirname "$whitelist_file")" 2>/dev/null; then
-            print_error "Не удалось создать директорию: $(dirname "$whitelist_file")"
+        if ! mkdir -p "$LISTS_DIR" 2>/dev/null; then
+            print_error "Не удалось создать директорию: $LISTS_DIR"
             print_info "Проверьте права доступа"
             pause
             return 1
@@ -1078,10 +1336,8 @@ INFO
                 return 1
             fi
 
-            # Удалить домен (экранируем точки для sed regex)
-            local escaped_domain
-            escaped_domain=$(printf '%s' "$del_domain" | sed 's/\./\\./g')
-            sed -i "/^${escaped_domain}$/d" "$whitelist_file"
+            # Удалить домен
+            sed -i "/^${del_domain}$/d" "$whitelist_file"
             print_success "Домен $del_domain удален из whitelist"
             print_separator
 
@@ -1113,12 +1369,29 @@ menu_quic_settings() {
     clear_screen
     print_header "Настройки QUIC"
 
+    # Текущий статус
+    local quic_yt_enabled="Включен"
+    local quic_rkn_status
+    if is_rutracker_quic_enabled; then
+        quic_rkn_status="Включен"
+    else
+        quic_rkn_status="Выключен"
+    fi
+
     printf "\nТекущие настройки:\n"
-    printf "  YouTube QUIC: стратегия #%s\n" "$(get_current_quic_strategy)"
+    printf "  YouTube QUIC:    %s (стратегия #%s)\n" "$quic_yt_enabled" "$(get_current_quic_strategy)"
+    printf "  RuTracker QUIC:  %s" "$quic_rkn_status"
+    if is_rutracker_quic_enabled; then
+        printf " (стратегия #%s)\n" "$(get_rutracker_quic_strategy)"
+    else
+        printf "\n"
+    fi
 
     cat <<'MENU'
 
 [1] YouTube QUIC - выбрать стратегию
+[2] RuTracker QUIC - включить/выключить
+[3] RuTracker QUIC - выбрать стратегию
 [B] Назад
 
 MENU
@@ -1128,7 +1401,104 @@ MENU
 
     case "$choice" in
         1)
+            # YouTube QUIC - выбор стратегии
             menu_select_quic_strategy_youtube
+            ;;
+        2)
+            # RuTracker QUIC - включить/выключить
+            menu_toggle_rutracker_quic
+            ;;
+        3)
+            # RuTracker QUIC - выбор стратегии
+            if is_rutracker_quic_enabled; then
+                menu_select_quic_strategy_rutracker
+            else
+                print_warning "RuTracker QUIC выключен"
+                print_info "Сначала включите RuTracker QUIC (опция [2])"
+                pause
+            fi
+            ;;
+        b|B)
+            return 0
+            ;;
+        *)
+            print_error "Неверный выбор: $choice"
+            pause
+            ;;
+    esac
+}
+
+# Включить/выключить QUIC для RuTracker
+menu_toggle_rutracker_quic() {
+    clear_screen
+    print_header "RuTracker QUIC - включить/выключить"
+
+    local current_status
+    if is_rutracker_quic_enabled; then
+        current_status="включен"
+    else
+        current_status="выключен"
+    fi
+
+    printf "\nТекущий статус: %s\n" "$current_status"
+    printf "\nЧто сделать?\n"
+    printf "[1] Включить RuTracker QUIC\n"
+    printf "[2] Выключить RuTracker QUIC\n"
+    printf "[B] Назад\n\n"
+
+    printf "Ваш выбор: "
+    read_input choice
+
+    case "$choice" in
+        1)
+            # Включить
+            set_rutracker_quic_enabled 1
+            print_success "RuTracker QUIC включен"
+
+            # Получить текущие стратегии
+            local config_file="${CONFIG_DIR}/category_strategies.conf"
+            local current_yt_tcp=1
+            local current_yt_gv=1
+            local current_rkn=1
+
+            if [ -f "$config_file" ]; then
+                current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
+                current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
+                current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
+                [ -z "$current_yt_tcp" ] && current_yt_tcp=1
+                [ -z "$current_yt_gv" ] && current_yt_gv=1
+                [ -z "$current_rkn" ] && current_rkn=1
+            fi
+
+            # Применить изменения
+            apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
+            print_success "Изменения применены"
+            pause
+            ;;
+        2)
+            # Выключить
+            set_rutracker_quic_enabled 0
+            print_success "RuTracker QUIC выключен"
+
+            # Получить текущие стратегии
+            local config_file="${CONFIG_DIR}/category_strategies.conf"
+            local current_yt_tcp=1
+            local current_yt_gv=1
+            local current_rkn=1
+
+            if [ -f "$config_file" ]; then
+                current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
+                current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
+                current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
+                [ -z "$current_yt_tcp" ] && current_yt_tcp=1
+                [ -z "$current_yt_gv" ] && current_yt_gv=1
+                [ -z "$current_rkn" ] && current_rkn=1
+            fi
+
+            # Применить изменения
+            apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
+            print_success "Изменения применены"
+            pause
             ;;
         b|B)
             return 0
@@ -1189,315 +1559,95 @@ menu_select_quic_strategy_youtube() {
 
     set_current_quic_strategy "$new_strategy"
 
-    # Обновить config и перезапустить
-    . "${LIB_DIR}/config_official.sh"
-    update_nfqws2_opt_in_config "${ZAPRET2_DIR}/config"
-    local init_script="${Z2K_INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
-    [ -f "$init_script" ] && "$init_script" restart >/dev/null 2>&1
+    # Получить текущие стратегии
+    local config_file="${CONFIG_DIR}/category_strategies.conf"
+    local current_yt_tcp=1
+    local current_yt_gv=1
+    local current_rkn=1
+
+    if [ -f "$config_file" ]; then
+        current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        [ -z "$current_yt_tcp" ] && current_yt_tcp=1
+        [ -z "$current_yt_gv" ] && current_yt_gv=1
+        [ -z "$current_rkn" ] && current_rkn=1
+    fi
+
+    apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
     print_success "YouTube QUIC стратегия #$new_strategy применена"
     pause
 }
 
-
-# ==============================================================================
-# ПОДМЕНЮ: КОНСТРУКТОР CIRCULAR
-# ==============================================================================
-
-menu_circular_builder() {
-    if ! is_zapret2_installed; then
-        print_error "zapret2 не установлен"
-        pause
-        return
-    fi
-
-    while true; do
-        clear_screen
-        print_header "[C] Конструктор circular (автоперебор стратегий)"
-
-        cat <<'SUBMENU'
-
-Circular оркестратор автоматически перебирает стратегии
-при сбоях соединения (DPI-блокировке).
-
-[1] Собрать circular вручную (выбор стратегий)
-[2] Автосборка (тест + выбор рабочих)
-[3] Параметры TCP circular (fails/time)
-[4] Параметры QUIC circular (udp_in/udp_out)
-[5] Вернуть стандартный autocircular
-[6] Показать текущий circular
-[B] Назад
-
-SUBMENU
-        printf "Ваш выбор: "
-        read_input choice
-
-        case "$choice" in
-            1)
-                menu_circular_pick_strategies
-                ;;
-            2)
-                menu_circular_auto_build
-                ;;
-            3)
-                menu_circular_params "tcp"
-                ;;
-            4)
-                menu_circular_params "quic"
-                ;;
-            5)
-                menu_circular_restore_default
-                ;;
-            6)
-                menu_circular_show
-                ;;
-            [Bb])
-                return
-                ;;
-            *)
-                print_error "Неверный выбор"
-                pause
-                ;;
-        esac
-    done
-}
-
-# Выбор стратегий вручную для circular
-menu_circular_pick_strategies() {
+# Выбор QUIC стратегии для RuTracker
+menu_select_quic_strategy_rutracker() {
     clear_screen
-    print_header "Сборка circular из стратегий"
+    print_header "RuTracker QUIC - выбор стратегии"
 
-    # Выбор типа: TCP или QUIC
-    printf "\nТип стратегий:\n"
-    printf "[1] TCP стратегии\n"
-    printf "[2] QUIC стратегии\n"
-    printf "[B] Назад\n\n"
-    printf "Ваш выбор: "
-    read_input type_choice
-
-    case "$type_choice" in
-        1) _menu_circular_pick_tcp ;;
-        2) _menu_circular_pick_quic ;;
-        [Bb]) return ;;
-        *) print_error "Неверный выбор"; pause ;;
-    esac
-}
-
-_menu_circular_pick_tcp() {
-    local total_count
-    total_count=$(get_strategies_count)
-    local conf="${STRATEGIES_CONF:-${CONFIG_DIR}/strategies.conf}"
-
-    print_separator
-    print_info "Доступные TCP стратегии (всего: $total_count):"
-    printf "\n"
-
-    # Показать стратегии постранично по 20
-    local page=1 per_page=20 shown=0
-    while IFS='|' read -r num type params name; do
-        [ -z "$num" ] && continue
-        shown=$((shown + 1))
-        if [ $shown -gt $(( (page - 1) * per_page )) ] && [ $shown -le $((page * per_page)) ]; then
-            local short_params
-            short_params=$(printf "%s" "$params" | cut -c1-60)
-            if [ -n "$name" ]; then
-                printf "  #%-3s [%s] %s\n" "$num" "$name" "$short_params"
-            else
-                printf "  #%-3s %s\n" "$num" "$short_params"
-            fi
-        fi
-    done < "$conf"
-
-    if [ $total_count -gt $per_page ]; then
-        printf "\n  (показаны 1-%s из %s, введите 'n' для следующей страницы)\n" "$per_page" "$total_count"
-    fi
-
-    # Ввод диапазона
-    printf "\nВведите номера стратегий через запятую или диапазон\n"
-    printf "Примеры: 1,3,5  или  1-10  или  1,3,5-10,15\n"
-    printf "Или Enter для отмены: "
-    read_input range_input
-
-    [ -z "$range_input" ] && { print_info "Отменено"; pause; return; }
-
-    local nums
-    nums=$(parse_strategy_range "$range_input")
-    if [ -z "$nums" ]; then
-        print_error "Неверный формат диапазона: $range_input"
-        pause
-        return
-    fi
-
-    local count=0
-    for _ in $nums; do count=$((count + 1)); done
-    if [ "$count" -lt 2 ]; then
-        print_error "Для circular нужно минимум 2 стратегии"
-        pause
-        return
-    fi
-
-    print_info "Выбрано стратегий: $count ($nums)"
-    printf "\nПрименить TCP circular? [Y/n]: "
-    read_input confirm
-    case "$confirm" in
-        [Nn]) print_info "Отменено" ;;
-        *)
-            apply_custom_circular "TCP" "$nums"
-            print_success "TCP circular применён ($count стратегий)"
-            ;;
-    esac
-    pause
-}
-
-_menu_circular_pick_quic() {
     local total_quic
     total_quic=$(get_quic_strategies_count)
-    local conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR}/quic_strategies.conf}"
 
-    print_separator
-    print_info "Доступные QUIC стратегии (всего: $total_quic):"
-    printf "\n"
-
-    while IFS='|' read -r num name args desc; do
-        [ -z "$num" ] && continue
-        printf "  #%-3s [%s] %s\n" "$num" "$name" "${desc:-$args}" | cut -c1-78
-    done < "$conf"
-
-    printf "\nВведите номера стратегий (пример: 1,3,5-10) или Enter для отмены: "
-    read_input range_input
-
-    [ -z "$range_input" ] && { print_info "Отменено"; pause; return; }
-
-    local nums
-    nums=$(parse_strategy_range "$range_input")
-    if [ -z "$nums" ]; then
-        print_error "Неверный формат диапазона: $range_input"
+    if [ "$total_quic" -eq 0 ]; then
+        print_error "QUIC стратегии не найдены"
         pause
-        return
+        return 1
     fi
 
-    local count=0
-    for _ in $nums; do count=$((count + 1)); done
-    if [ "$count" -lt 2 ]; then
-        print_error "Для circular нужно минимум 2 стратегии"
+    local current_quic
+    current_quic=$(get_rutracker_quic_strategy)
+
+    printf "\nВсего QUIC стратегий: %s\n" "$total_quic"
+    printf "Текущая стратегия: #%s\n\n" "$current_quic"
+
+    printf "Введите номер стратегии [1-%s] или Enter для отмены: " "$total_quic"
+    read_input new_strategy
+
+    if [ -z "$new_strategy" ]; then
+        print_info "Отменено"
         pause
-        return
+        return 0
     fi
 
-    print_info "Выбрано QUIC стратегий: $count ($nums)"
-    printf "\nПрименить QUIC circular? [Y/n]: "
-    read_input confirm
-    case "$confirm" in
-        [Nn]) print_info "Отменено" ;;
-        *)
-            apply_custom_quic_circular "$nums"
-            print_success "QUIC circular применён ($count стратегий)"
-            ;;
-    esac
-    pause
-}
-
-# Автосборка circular из результатов тестирования
-menu_circular_auto_build() {
-    clear_screen
-    print_header "Автосборка circular (тест стратегий)"
-
-    local category="TCP"
-
-    local total_count
-    total_count=$(get_strategies_count)
-
-    printf "\nДиапазон стратегий для тестирования [1-%s]\n" "$total_count"
-    printf "Формат: 1-12 или 1,3,5-10 (по умолчанию: 1-12): "
-    read_input range_input
-    [ -z "$range_input" ] && range_input="1-12"
-
-    printf "\nМинимальная оценка для включения (1-5, по умолчанию 3): "
-    read_input min_score
-    [ -z "$min_score" ] && min_score=3
-
-    print_separator
-    print_warning "Автосборка займёт время. Каждая стратегия тестируется ~5 сек."
-    printf "Начать? [Y/n]: "
-    read_input confirm
-    case "$confirm" in
-        [Nn]) print_info "Отменено"; pause; return ;;
-    esac
-
-    auto_build_circular "$category" "$range_input" "$min_score"
-    pause
-}
-
-# Настройка параметров circular
-menu_circular_params() {
-    local mode=$1  # "tcp" или "quic"
-    clear_screen
-
-    load_circular_params
-
-    if [ "$mode" = "quic" ]; then
-        print_header "Параметры QUIC circular"
-        printf "\nТекущие параметры:\n"
-        printf "  fails   = %s  (сбоев до переключения)\n" "${CIRCULAR_FAILS:-2}"
-        printf "  time    = %s  (окно времени, сек)\n" "${CIRCULAR_TIME:-60}"
-        printf "  udp_in  = %s  (входящих пакетов до анализа)\n" "${CIRCULAR_UDP_IN:-1}"
-        printf "  udp_out = %s  (исходящих пакетов до анализа)\n" "${CIRCULAR_UDP_OUT:-4}"
-    else
-        print_header "Параметры TCP circular"
-        printf "\nТекущие параметры:\n"
-        printf "  fails = %s  (сбоев до переключения стратегии)\n" "${CIRCULAR_FAILS:-2}"
-        printf "  time  = %s  (окно времени в секундах)\n" "${CIRCULAR_TIME:-60}"
+    if ! echo "$new_strategy" | grep -qE '^[0-9]+$'; then
+        print_error "Неверный формат"
+        pause
+        return 1
     fi
 
-    print_separator
-    printf "\nВведите новое значение fails (Enter = оставить %s): " "${CIRCULAR_FAILS:-2}"
-    read_input new_fails
-    [ -n "$new_fails" ] && CIRCULAR_FAILS="$new_fails"
-
-    printf "Введите новое значение time (Enter = оставить %s): " "${CIRCULAR_TIME:-60}"
-    read_input new_time
-    [ -n "$new_time" ] && CIRCULAR_TIME="$new_time"
-
-    if [ "$mode" = "quic" ]; then
-        printf "Введите новое значение udp_in (Enter = оставить %s): " "${CIRCULAR_UDP_IN:-1}"
-        read_input new_udp_in
-        [ -n "$new_udp_in" ] && CIRCULAR_UDP_IN="$new_udp_in"
-
-        printf "Введите новое значение udp_out (Enter = оставить %s): " "${CIRCULAR_UDP_OUT:-4}"
-        read_input new_udp_out
-        [ -n "$new_udp_out" ] && CIRCULAR_UDP_OUT="$new_udp_out"
+    if [ "$new_strategy" -lt 1 ] || [ "$new_strategy" -gt "$total_quic" ]; then
+        print_error "Номер вне диапазона"
+        pause
+        return 1
     fi
 
-    save_circular_params
-    print_success "Параметры circular сохранены"
-    printf "\nПримечание: параметры будут использованы при следующей сборке circular.\n"
-    printf "Для применения пересоберите circular (опции 1 или 2).\n"
+    if ! quic_strategy_exists "$new_strategy"; then
+        print_error "QUIC стратегия #$new_strategy не найдена"
+        pause
+        return 1
+    fi
+
+    set_rutracker_quic_strategy "$new_strategy"
+
+    # Получить текущие стратегии
+    local config_file="${CONFIG_DIR}/category_strategies.conf"
+    local current_yt_tcp=1
+    local current_yt_gv=1
+    local current_rkn=1
+
+    if [ -f "$config_file" ]; then
+        current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        [ -z "$current_yt_tcp" ] && current_yt_tcp=1
+        [ -z "$current_yt_gv" ] && current_yt_gv=1
+        [ -z "$current_rkn" ] && current_rkn=1
+    fi
+
+    apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
+    print_success "RuTracker QUIC стратегия #$new_strategy применена"
     pause
 }
 
-# Восстановить стандартный autocircular
-menu_circular_restore_default() {
-    clear_screen
-    print_header "Восстановление стандартного autocircular"
-
-    printf "\nЭто заменит текущие circular стратегии на стандартные\n"
-    printf "autocircular из strats_new2.txt / quic_strats.ini.\n\n"
-    printf "Продолжить? [Y/n]: "
-    read_input confirm
-    case "$confirm" in
-        [Nn]) print_info "Отменено"; pause; return ;;
-    esac
-
-    apply_autocircular_strategies
-    print_success "Стандартный autocircular восстановлен"
-    pause
-}
-
-# Показать текущее состояние circular
-menu_circular_show() {
-    clear_screen
-    show_circular_info
-    pause
-}
 
 # ==============================================================================
 # ЭКСПОРТ ФУНКЦИЙ

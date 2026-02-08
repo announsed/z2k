@@ -7,18 +7,90 @@
 # КОНСТАНТЫ ДЛЯ СТРАТЕГИЙ
 # ==============================================================================
 
+TOP20_STRATEGIES="1 7 13 19 25 31 37 43 49 55 61 67 73 79 85 91 97 103 109 115"
+
+# Домены для тестирования стратегий
+TEST_DOMAINS="
+http://rutracker.org
+https://rutracker.org
+https://www.youtube.com
+https://discord.com
+https://googlevideo.com
+"
+
 # ==============================================================================
 # РАБОТА С ФАЙЛАМИ СТРАТЕГИЙ ПО КАТЕГОРИЯМ (CONFIG-DRIVEN АРХИТЕКТУРА)
 # ==============================================================================
 
+# Сохранить стратегию в файл категории
+# $1 - категория (YT, YT_GV, RKN, RUTRACKER)
+# $2 - протокол (TCP или UDP)
+# $3 - параметры стратегии
+save_strategy_to_category() {
+    local category=$1
+    local protocol=$2
+    local params=$3
+
+    if [ -z "$category" ] || [ -z "$protocol" ] || [ -z "$params" ]; then
+        print_error "save_strategy_to_category: некорректные параметры"
+        return 1
+    fi
+
+    local strategy_file="${ZAPRET2_DIR:-/opt/zapret2}/extra_strats/${protocol}/${category}/Strategy.txt"
+
+    # Создать директорию если не существует
+    mkdir -p "$(dirname "$strategy_file")" || {
+        print_error "Не удалось создать директорию для стратегии $category/$protocol"
+        return 1
+    }
+
+    # Сохранить параметры
+    echo "$params" > "$strategy_file" || {
+        print_error "Не удалось сохранить стратегию в $strategy_file"
+        return 1
+    }
+
+    return 0
+}
+
+# Создать дефолтные файлы стратегий при установке
+# Вызывается из step_create_config_and_init()
+create_default_strategy_files() {
+    local extra_strats_dir="${ZAPRET2_DIR:-/opt/zapret2}/extra_strats"
+
+    print_info "Создание дефолтных файлов стратегий..."
+
+    # Дефолтная TCP стратегия
+    local default_tcp="--filter-tcp=443,2053,2083,2087,2096,8443 --filter-l7=tls --payload=tls_client_hello --out-range=-n10 --lua-desync=fake:blob=fake_default_tls:repeats=4"
+
+    # Дефолтная UDP стратегия (QUIC)
+    local default_udp="--filter-udp=443 --filter-l7=quic --payload=quic_initial --out-range=-n10 --lua-desync=fake:blob=fake_default_quic:repeats=3"
+
+    # Создать директории и файлы
+    mkdir -p "$extra_strats_dir/TCP/YT"
+    mkdir -p "$extra_strats_dir/TCP/YT_GV"
+    mkdir -p "$extra_strats_dir/TCP/RKN"
+    mkdir -p "$extra_strats_dir/UDP/YT"
+    mkdir -p "$extra_strats_dir/UDP/RUTRACKER"
+
+    # Сохранить дефолтные стратегии
+    echo "$default_tcp" > "$extra_strats_dir/TCP/YT/Strategy.txt"
+    echo "$default_tcp" > "$extra_strats_dir/TCP/YT_GV/Strategy.txt"
+    echo "$default_tcp" > "$extra_strats_dir/TCP/RKN/Strategy.txt"
+    echo "$default_udp" > "$extra_strats_dir/UDP/YT/Strategy.txt"
+    echo "$default_udp" > "$extra_strats_dir/UDP/RUTRACKER/Strategy.txt"
+
+    print_success "Дефолтные файлы стратегий созданы"
+    return 0
+}
 
 # ==============================================================================
 # ПАРСИНГ STRATS.TXT → STRATEGIES.CONF
 # ==============================================================================
 
 # Генерация strategies.conf из strats_new2.txt
-# Формат входа: test_name ipv4 domain : nfqws2 <параметры>
-# Формат выхода: [NUMBER]|[TYPE]|[PARAMETERS]|[NAME]
+# Формат входа: curl_test_http[s] ipv4 rutracker.org : nfqws2 <параметры>
+# Формат выхода: [NUMBER]|[TYPE]|[PARAMETERS]
 generate_strategies_conf() {
     local input_file=$1
     local output_file=$2
@@ -34,7 +106,7 @@ generate_strategies_conf() {
     cat > "$output_file" <<'EOF'
 # Zapret2 Strategies Database
 # Сгенерировано из blockcheck2 output
-# Формат: [NUMBER]|[TYPE]|[PARAMETERS]|[NAME]
+# Формат: [NUMBER]|[TYPE]|[PARAMETERS]
 EOF
 
     local num=1
@@ -55,10 +127,6 @@ EOF
         local type="https"
         https_count=$((https_count + 1))
 
-        # Извлечь имя стратегии (первое слово test_cmd)
-        local name
-        name=$(echo "$test_cmd" | awk '{print $1}')
-
         # Извлечь nfqws2 параметры (удалить " nfqws2 " в начале)
         local params
         params=$(echo "$nfqws_params" | sed 's/^ *nfqws2 *//' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
@@ -66,8 +134,8 @@ EOF
         # Пропустить если параметры пустые
         [ -z "$params" ] && continue
 
-        # Записать в strategies.conf с именем
-        echo "${num}|${type}|${params}|${name}" >> "$output_file"
+        # Записать в strategies.conf
+        echo "${num}|${type}|${params}" >> "$output_file"
 
         num=$((num + 1))
     done
@@ -109,31 +177,6 @@ get_strategy_type() {
     fi
 
     grep "^${num}|" "$conf" | cut -d'|' -f2
-}
-
-# Найти номер стратегии по имени (поле 4 в strategies.conf)
-# Возвращает первый найденный номер или пустую строку
-find_strategy_by_name() {
-    local name=$1
-    local conf="${STRATEGIES_CONF:-${CONFIG_DIR}/strategies.conf}"
-
-    if [ ! -f "$conf" ]; then
-        return 1
-    fi
-
-    grep "|${name}$" "$conf" | head -n 1 | cut -d'|' -f1
-}
-
-# Найти номер QUIC стратегии по имени (поле 2 в quic_strategies.conf)
-find_quic_strategy_by_name() {
-    local name=$1
-    local conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR}/quic_strategies.conf}"
-
-    if [ ! -f "$conf" ]; then
-        return 1
-    fi
-
-    grep "|${name}|" "$conf" | head -n 1 | cut -d'|' -f1
 }
 
 # Получить QUIC стратегию по номеру
@@ -214,11 +257,47 @@ get_current_quic_strategy() {
     echo "1"
 }
 
+# Получить текущую QUIC стратегию для RuTracker
+get_rutracker_quic_strategy() {
+    local conf="${RUTRACKER_QUIC_STRATEGY_FILE:-${CONFIG_DIR}/rutracker_quic_strategy.conf}"
+    if [ -f "$conf" ]; then
+        . "$conf"
+        [ -n "$RUTRACKER_QUIC_STRATEGY" ] && echo "$RUTRACKER_QUIC_STRATEGY" && return 0
+    fi
+    echo "43"
+}
+
+# Проверить включен ли QUIC для RuTracker
+is_rutracker_quic_enabled() {
+    local conf="${CONFIG_DIR}/rutracker_quic_enabled.conf"
+    if [ -f "$conf" ]; then
+        . "$conf"
+        [ "$RUTRACKER_QUIC_ENABLED" = "1" ] && return 0
+    fi
+    return 1
+}
+
+# Включить/выключить QUIC для RuTracker
+set_rutracker_quic_enabled() {
+    local enabled=$1  # 1 или 0
+    local conf="${CONFIG_DIR}/rutracker_quic_enabled.conf"
+    mkdir -p "$CONFIG_DIR" 2>/dev/null
+    echo "RUTRACKER_QUIC_ENABLED=${enabled}" > "$conf"
+}
+
+
 # Сохранить текущую QUIC стратегию
 set_current_quic_strategy() {
     local num=$1
     local conf="${QUIC_STRATEGY_FILE:-${CONFIG_DIR}/quic_strategy.conf}"
     echo "QUIC_STRATEGY=$num" > "$conf"
+}
+
+# Сохранить текущую QUIC стратегию для RuTracker
+set_rutracker_quic_strategy() {
+    local num=$1
+    local conf="${RUTRACKER_QUIC_STRATEGY_FILE:-${CONFIG_DIR}/rutracker_quic_strategy.conf}"
+    echo "RUTRACKER_QUIC_STRATEGY=$num" > "$conf"
 }
 
 
@@ -232,6 +311,20 @@ build_quic_profile_params() {
 get_current_quic_profile_params() {
     local quic_strategy
     quic_strategy=$(get_current_quic_strategy)
+    local quic_params
+    quic_params=$(get_quic_strategy "$quic_strategy" 2>/dev/null)
+
+    if [ -z "$quic_params" ]; then
+        quic_params="--payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
+    fi
+
+    build_quic_profile_params "$quic_params"
+}
+
+# Получить параметры QUIC профиля для RuTracker
+get_rutracker_quic_profile_params() {
+    local quic_strategy
+    quic_strategy=$(get_rutracker_quic_strategy)
     local quic_params
     quic_params=$(get_quic_strategy "$quic_strategy" 2>/dev/null)
 
@@ -350,68 +443,172 @@ build_tls_profile_params() {
         payload="--payload=tls_client_hello"
     fi
 
-    # --out-range: прекращает обработку Lua после 32768+1460 байт исходящих данных.
-    # После TLS хендшейка DPI уже не вмешивается — экономим CPU на роутере.
-    local out_range=""
-    case " $params " in
-        *" --out-range="*) ;;
-        *) out_range="--out-range=-s34228" ;;
-    esac
-
-    printf "%s" "${prefix:+$prefix }${payload:+$payload }${out_range:+$out_range }${params}"
-}
-
-build_http_profile_params() {
-    local params=$1
-    local prefix=""
-    local payload=""
-
-    if ! params_has_filter_tcp "$params"; then
-        prefix="--filter-tcp=80"
-    fi
-    if ! params_has_filter_l7 "$params"; then
-        prefix="${prefix} --filter-l7=http"
-    fi
-    if ! params_has_payload "$params"; then
-        payload="--payload=http_req"
-    fi
-
     printf "%s %s %s" "$prefix" "$payload" "$params"
 }
 
 # ==============================================================================
-# ПРИМЕНЕНИЕ СТРАТЕГИЙ (УПРОЩЁННАЯ АРХИТЕКТУРА)
+# ГЕНЕРАЦИЯ MULTI-PROFILE КОНФИГУРАЦИИ
 # ==============================================================================
 
-# Применить стратегию (единый профиль для всех доменов)
-# Сохраняет номер стратегии и обновляет NFQWS2_OPT в config
-apply_strategy_simple() {
+# Генерация мульти-профиля (TCP + UDP) из базовых параметров
+generate_multiprofile() {
+    local base_params=$1
+    local type=$2
+
+    # Генерация переменных для init скрипта (применяется ко всем категориям)
+    local tcp_params
+
+    if [ "$type" = "http" ]; then
+        tcp_params=$(build_http_profile_params "$base_params")
+    else
+        tcp_params=$(build_tls_profile_params "$base_params")
+    fi
+
+    local quic_params
+    quic_params=$(get_current_quic_profile_params)
+
+    local discord_udp
+    discord_udp=$(get_init_udp_params "DISCORD" "${INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}")
+    if [ -z "$discord_udp" ]; then
+        discord_udp="--filter-udp=50000-50099,1400,3478-3481,5349 --filter-l7=discord,stun --payload=stun,discord_ip_discovery --out-range=-n10 --lua-desync=fake:blob=0x00000000000000000000000000000000:repeats=2"
+    fi
+
+    # Генерировать переменные для всех категорий (YouTube TCP, GV, RKN)
+    cat <<PROFILE
+# YouTube TCP стратегия (интерфейс YouTube)
+# YOUTUBE_TCP_MARKER_START
+YOUTUBE_TCP_TCP="$tcp_params"
+YOUTUBE_TCP_UDP=""
+# YOUTUBE_TCP_MARKER_END
+
+# YouTube GV стратегия (Google Video CDN)
+# YOUTUBE_GV_MARKER_START
+YOUTUBE_GV_TCP="$tcp_params"
+YOUTUBE_GV_UDP=""
+# YOUTUBE_GV_MARKER_END
+
+# RKN стратегия (заблокированные сайты)
+# RKN_MARKER_START
+RKN_TCP="$tcp_params"
+RKN_UDP=""
+# RKN_MARKER_END
+
+# Discord стратегия (сообщения и голос)
+# DISCORD_MARKER_START
+DISCORD_TCP="$tcp_params"
+DISCORD_UDP="$discord_udp"
+# DISCORD_MARKER_END
+
+# Custom стратегия (пользовательские домены)
+# CUSTOM_MARKER_START
+CUSTOM_TCP="$tcp_params"
+CUSTOM_UDP=""
+# CUSTOM_MARKER_END
+
+# QUIC стратегия (YouTube UDP 443)
+# QUIC_MARKER_START
+QUIC_TCP=""
+QUIC_UDP="$quic_params"
+# QUIC_MARKER_END
+
+# QUIC стратегия (RuTracker UDP 443)
+# QUIC_RKN_MARKER_START
+QUIC_RKN_TCP=""
+QUIC_RKN_UDP="$quic_params"
+# QUIC_RKN_MARKER_END
+PROFILE
+}
+
+# ==============================================================================
+# ПРИМЕНЕНИЕ СТРАТЕГИЙ К INIT СКРИПТУ
+# ==============================================================================
+
+# Применить стратегию (config-driven архитектура)
+# Сохраняет стратегию в файлы категорий и обновляет config файл
+apply_strategy() {
     local strategy_num=$1
     local zapret_config="${ZAPRET2_DIR:-/opt/zapret2}/config"
+    # Использовать Z2K_INIT_SCRIPT который не перезаписывается модулями zapret2
+    local init_script="${Z2K_INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
 
+    # Проверить существование стратегии
     if ! strategy_exists "$strategy_num"; then
         print_error "Стратегия #$strategy_num не найдена"
         return 1
     fi
 
+    # Получить параметры стратегии
+    local params
+    params=$(get_strategy "$strategy_num")
+
+    if [ -z "$params" ]; then
+        print_error "Не удалось получить параметры стратегии #$strategy_num"
+        return 1
+    fi
+
+    # Получить тип стратегии
+    local type
+    type=$(get_strategy_type "$strategy_num")
+
+    print_info "Применение стратегии #$strategy_num (тип: $type)..."
+
+    # Построить полные TCP параметры
+    local tcp_params
+    if [ "$type" = "http" ]; then
+        tcp_params=$(build_http_profile_params "$params")
+    else
+        tcp_params=$(build_tls_profile_params "$params")
+    fi
+
+    # Получить текущие QUIC параметры
+    local udp_params
+    udp_params=$(get_current_quic_profile_params)
+
+    # Сохранить стратегию во все категории (единая стратегия для всех)
+    print_info "Сохранение стратегии в файлы категорий..."
+    save_strategy_to_category "YT" "TCP" "$tcp_params" || return 1
+    save_strategy_to_category "YT_GV" "TCP" "$tcp_params" || return 1
+    save_strategy_to_category "RKN" "TCP" "$tcp_params" || return 1
+    save_strategy_to_category "YT" "UDP" "$udp_params" || return 1
+    save_strategy_to_category "RUTRACKER" "UDP" "$udp_params" || return 1
+
+    # Обновить config файл (NFQWS2_OPT секцию)
+    print_info "Обновление config файла..."
+    . "${LIB_DIR}/config_official.sh" || {
+        print_error "Не удалось загрузить config_official.sh"
+        return 1
+    }
+
+    update_nfqws2_opt_in_config "$zapret_config" || {
+        print_error "Не удалось обновить config файл"
+        return 1
+    }
+
     # Сохранить номер текущей стратегии
     mkdir -p "$CONFIG_DIR"
     echo "CURRENT_STRATEGY=$strategy_num" > "$CURRENT_STRATEGY_FILE"
 
-    # Обновить NFQWS2_OPT в config
-    . "${LIB_DIR}/config_official.sh"
-    update_nfqws2_opt_in_config "$zapret_config" || return 1
+    print_success "Стратегия #$strategy_num применена"
 
     # Перезапустить сервис
-    local init_script="${Z2K_INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
-    [ -f "$init_script" ] && "$init_script" restart >/dev/null 2>&1
+    print_info "Перезапуск сервиса..."
+
+    # Проверить что init скрипт существует
+    if [ ! -f "$init_script" ]; then
+        print_error "Init скрипт не найден: $init_script"
+        return 1
+    fi
+
+    # Подавляем вывод restart для чистоты (только ошибки видны)
+    "$init_script" restart >/dev/null 2>&1
+
     sleep 2
 
     if is_zapret2_running; then
-        print_success "Стратегия #$strategy_num применена"
+        print_success "Сервис перезапущен"
         return 0
     else
-        print_warning "Сервис не запустился"
+        print_warning "Сервис не запустился, проверьте логи"
         return 1
     fi
 }
@@ -460,7 +657,7 @@ apply_strategy_safe() {
     local init_script="${INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
 
     # Применить стратегию
-    if ! apply_strategy_simple "$num"; then
+    if ! apply_strategy "$num"; then
         return 1
     fi
 
@@ -477,7 +674,7 @@ apply_strategy_safe() {
     if [ "$score" -lt 3 ]; then
         print_warning "Стратегия работает плохо (оценка: $score/5)"
         printf "Применить всё равно? [y/N]: "
-        read -r answer </dev/tty
+        read -r answer </dev/tty </dev/tty
 
         case "$answer" in
             [Yy]|[Yy][Ee][Ss])
@@ -518,9 +715,6 @@ test_strategy_tls() {
     iptables -t mangle -I OUTPUT -p tcp --dport 443 -j NFQUEUE --queue-num 200 --queue-bypass 2>/dev/null
     iptables -t mangle -I OUTPUT -p udp --dport 443 -j NFQUEUE --queue-num 200 --queue-bypass 2>/dev/null
 
-    # Гарантировать очистку iptables при любом выходе (Ctrl+C, ошибка и т.д.)
-    trap 'iptables -t mangle -D OUTPUT -p tcp --dport 443 -j NFQUEUE --queue-num 200 --queue-bypass 2>/dev/null; iptables -t mangle -D OUTPUT -p udp --dport 443 -j NFQUEUE --queue-num 200 --queue-bypass 2>/dev/null' EXIT INT TERM
-
     # Проверка TLS 1.2
     if curl --tls-max 1.2 --max-time "$timeout" -s -o /dev/null "https://${domain}" 2>/dev/null; then
         tls12_success=1
@@ -531,10 +725,9 @@ test_strategy_tls() {
         tls13_success=1
     fi
 
-    # Удалить временные правила и снять trap
+    # Удалить временные правила
     iptables -t mangle -D OUTPUT -p tcp --dport 443 -j NFQUEUE --queue-num 200 --queue-bypass 2>/dev/null
     iptables -t mangle -D OUTPUT -p udp --dport 443 -j NFQUEUE --queue-num 200 --queue-bypass 2>/dev/null
-    trap - EXIT INT TERM
 
     # Успех если хотя бы один из протоколов работает
     if [ "$tls12_success" -eq 1 ] || [ "$tls13_success" -eq 1 ]; then
@@ -575,7 +768,7 @@ generate_gv_domain() {
 
     # Если не удалось получить, вернуть известный рабочий домен
     if [ -z "$cluster_codename" ]; then
-        print_warning "GV redirector недоступен, используем fallback домен" >&2
+        echo "rr1---sn-5goeenes.googlevideo.com" >&2
         echo "rr1---sn-5goeenes.googlevideo.com"
         return 0
     fi
@@ -701,7 +894,7 @@ auto_test_youtube_tcp() {
         printf "  [%d/%d] Стратегия #%s... " "$tested" "$total" "$num" >&2
 
         # Применить стратегию (подавляем вывод для чистоты)
-        apply_strategy_simple "$num" >/dev/null 2>&1
+        apply_strategy "$num" >/dev/null 2>&1
         local apply_result=$?
         if [ "$apply_result" -ne 0 ]; then
             printf "ОШИБКА\n" >&2
@@ -757,7 +950,7 @@ auto_test_youtube_gv() {
         printf "  [%d/%d] Стратегия #%s... " "$tested" "$total" "$num" >&2
 
         # Применить стратегию (подавляем вывод для чистоты)
-        apply_strategy_simple "$num" >/dev/null 2>&1
+        apply_strategy "$num" >/dev/null 2>&1
         local apply_result=$?
         if [ "$apply_result" -ne 0 ]; then
             printf "ОШИБКА\n" >&2
@@ -809,7 +1002,7 @@ auto_test_rkn() {
         printf "  [%d/%d] Стратегия #%s... " "$tested" "$total" "$num" >&2
 
         # Применить стратегию (подавляем вывод для чистоты)
-        apply_strategy_simple "$num" >/dev/null 2>&1
+        apply_strategy "$num" >/dev/null 2>&1
         local apply_result=$?
         if [ "$apply_result" -ne 0 ]; then
             printf "ОШИБКА\n" >&2
@@ -898,7 +1091,7 @@ auto_test_top20() {
         printf "\n[%d/%d] Тестирование стратегии #%s...\n" "$tested" "$total" "$num"
 
         # Применить стратегию (без подтверждения)
-        apply_strategy_simple "$num" >/dev/null 2>&1 || {
+        apply_strategy "$num" >/dev/null 2>&1 || {
             print_warning "Не удалось применить стратегию #$num"
             continue
         }
@@ -934,7 +1127,7 @@ auto_test_top20() {
 
     # В автоматическом режиме сразу применить
     if [ "$auto_mode" -eq 1 ]; then
-        apply_strategy_simple "$best_strategy"
+        apply_strategy "$best_strategy"
         print_success "Стратегия #$best_strategy применена автоматически"
         return 0
     fi
@@ -950,7 +1143,7 @@ auto_test_top20() {
             return 0
             ;;
         *)
-            apply_strategy_simple "$best_strategy"
+            apply_strategy "$best_strategy"
             print_success "Стратегия #$best_strategy применена"
             return 0
             ;;
@@ -961,11 +1154,13 @@ auto_test_top20() {
 # АВТОТЕСТ ПО КАТЕГОРИЯМ V2 (Z4R РЕФЕРЕНС)
 # ==============================================================================
 
-# Автоматическое тестирование стратегий (единая для всех доменов)
-# Тестирует YouTube TCP, YouTube GV, RKN и выбирает лучшую общую стратегию
+# Автоматическое тестирование всех стратегий для каждой категории (Z4R метод)
+# Тестирует 3 категории: YouTube TCP, YouTube GV, RKN
+# Каждая категория получает свою первую работающую стратегию
 auto_test_all_categories_v2() {
     local auto_mode=0
 
+    # Проверить флаг --auto
     if [ "$1" = "--auto" ]; then
         auto_mode=1
     fi
@@ -975,10 +1170,13 @@ auto_test_all_categories_v2() {
         return 1
     fi
 
-    print_header "Автоподбор лучшей стратегии"
+    print_header "Автоподбор стратегий по категориям (Z4R метод)"
 
-    print_info "Тестируются все стратегии на нескольких доменах"
-    print_info "Это займет около 5-8 минут"
+    print_info "Будут протестированы стратегии для каждой категории:"
+    print_info "  - YouTube TCP (youtube.com)"
+    print_info "  - YouTube GV (googlevideo CDN)"
+    print_info "  - RKN (meduza.io, facebook.com, rutracker.org)"
+    print_info "Это займет около 8-10 минут"
     printf "\n"
 
     if [ "$auto_mode" -eq 0 ]; then
@@ -988,13 +1186,72 @@ auto_test_all_categories_v2() {
         fi
     fi
 
-    # Делегируем в auto_test_top20 с --auto если нужно
-    if [ "$auto_mode" -eq 1 ]; then
-        auto_test_top20 --auto
-    else
-        auto_test_top20
+    local config_file="${CONFIG_DIR}/category_strategies.conf"
+    mkdir -p "$CONFIG_DIR"
+
+    # Тестировать каждую категорию
+    # Используем временные файлы вместо subshell чтобы функции utils.sh были доступны
+    local result_file_tcp="/tmp/z2k_yt_tcp_result.txt"
+    local result_file_gv="/tmp/z2k_yt_gv_result.txt"
+    local result_file_rkn="/tmp/z2k_rkn_result.txt"
+
+    print_separator
+    print_info "Тестирование YouTube TCP..."
+    local strategies_list
+    strategies_list=$(get_all_strategies_list)
+    auto_test_youtube_tcp "$strategies_list" > "$result_file_tcp"
+    local yt_tcp_result=$?
+    local yt_tcp_strategy=$(tail -1 "$result_file_tcp" 2>/dev/null | tr -d '\n' || echo "1")
+
+    printf "\n"
+    print_separator
+    print_info "Тестирование YouTube GV..."
+    auto_test_youtube_gv "$strategies_list" > "$result_file_gv"
+    local yt_gv_result=$?
+    local yt_gv_strategy=$(tail -1 "$result_file_gv" 2>/dev/null | tr -d '\n' || echo "1")
+
+    printf "\n"
+    print_separator
+    print_info "Тестирование RKN..."
+    auto_test_rkn "$strategies_list" > "$result_file_rkn"
+    local rkn_result=$?
+    local rkn_strategy=$(tail -1 "$result_file_rkn" 2>/dev/null | tr -d '\n' || echo "1")
+
+    # Очистить временные файлы
+    rm -f "$result_file_tcp" "$result_file_gv" "$result_file_rkn"
+
+    # Показать итоговую таблицу
+    printf "\n"
+    print_separator
+    print_success "Автотест завершен"
+    print_separator
+    printf "\nРезультаты:\n"
+    printf "%-15s | %-10s | %s\n" "Категория" "Стратегия" "Статус"
+    print_separator
+    printf "%-15s | #%-9s | %s\n" "YouTube TCP" "$yt_tcp_strategy" "$([ $yt_tcp_result -eq 0 ] && echo 'OK' || echo 'ДЕФОЛТ')"
+    printf "%-15s | #%-9s | %s\n" "YouTube GV" "$yt_gv_strategy" "$([ $yt_gv_result -eq 0 ] && echo 'OK' || echo 'ДЕФОЛТ')"
+    printf "%-15s | #%-9s | %s\n" "RKN" "$rkn_strategy" "$([ $rkn_result -eq 0 ] && echo 'OK' || echo 'ДЕФОЛТ')"
+    print_separator
+
+    # Применить стратегии (в авто и интерактивном режиме одинаково)
+    if [ "$auto_mode" -eq 0 ]; then
+        # В интерактивном режиме спросить подтверждение
+        printf "\nПрименить эти стратегии? [Y/n]: "
+        read -r answer </dev/tty
+
+        case "$answer" in
+            [Nn]|[Nn][Oo])
+                print_info "Стратегии не применены"
+                print_info "Используйте меню для ручного выбора"
+                return 0
+                ;;
+        esac
     fi
-    return $?
+
+    # Применить выбранные стратегии (автотест и дефолтные работают одинаково)
+    printf "\n"
+    apply_category_strategies_v2 "$yt_tcp_strategy" "$yt_gv_strategy" "$rkn_strategy"
+    return 0
 }
 
 # Алиас для обратной совместимости
@@ -1040,7 +1297,7 @@ test_strategy_range() {
         printf "\n[%d/%d] Тестирование стратегии #%s...\n" "$tested" "$total" "$num"
 
         # Применить стратегию
-        apply_strategy_simple "$num" >/dev/null 2>&1 || {
+        apply_strategy "$num" >/dev/null 2>&1 || {
             print_warning "Не удалось применить стратегию #$num"
             num=$((num + 1))
             continue
@@ -1071,14 +1328,14 @@ test_strategy_range() {
 
     if [ "$best_strategy" -ne 0 ]; then
         printf "\nПрименить стратегию #%s? [Y/n]: " "$best_strategy"
-        read -r answer </dev/tty
+        read -r answer </dev/tty </dev/tty
 
         case "$answer" in
             [Nn]|[Nn][Oo])
                 print_info "Стратегия не применена"
                 ;;
             *)
-                apply_strategy_simple "$best_strategy"
+                apply_strategy "$best_strategy"
                 ;;
         esac
     fi
@@ -1088,6 +1345,143 @@ test_strategy_range() {
 # ПРИМЕНЕНИЕ СТРАТЕГИЙ ПО КАТЕГОРИЯМ
 # ==============================================================================
 
+# Применить разные стратегии для разных категорий
+# Параметр: строка вида "youtube:4:5 discord:7:4 custom:11:3"
+apply_category_strategies() {
+    local category_strategies=$1
+    local init_script="${INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
+
+    if [ -z "$category_strategies" ]; then
+        print_error "Не указаны стратегии для категорий"
+        return 1
+    fi
+
+    if [ ! -f "$init_script" ]; then
+        print_error "Init скрипт не найден: $init_script"
+        return 1
+    fi
+
+    print_info "Применение стратегий по категориям..."
+
+    # Обработать каждую категорию
+    for entry in $category_strategies; do
+        local category=$(echo "$entry" | cut -d: -f1)
+        local strategy_num=$(echo "$entry" | cut -d: -f2)
+        local score=$(echo "$entry" | cut -d: -f3)
+
+        print_info "  $category -> стратегия #$strategy_num (оценка: $score/5)"
+
+        # Получить параметры стратегии
+        local params
+        params=$(get_strategy "$strategy_num")
+
+        if [ -z "$params" ]; then
+            print_warning "Стратегия #$strategy_num не найдена, пропускаем $category"
+            continue
+        fi
+
+        # Конвертировать в TCP/UDP профили
+        local tcp_params
+        local udp_params
+
+        # Определить тип стратегии
+        local type
+        type=$(get_strategy_type "$strategy_num")
+
+        if [ "$type" = "https" ]; then
+            tcp_params="--filter-tcp=443 --filter-l7=tls --payload=tls_client_hello ${params}"
+            udp_params=""
+        else
+            tcp_params="--filter-tcp=80,443 --filter-l7=http ${params}"
+            udp_params=""
+        fi
+
+        # Обновить маркеры в init скрипте
+        case "$category" in
+            youtube)
+                update_init_section "YOUTUBE" "$tcp_params" "$udp_params" "$init_script"
+                ;;
+            discord)
+                update_init_section "DISCORD" "$tcp_params" "$udp_params" "$init_script"
+                ;;
+            custom)
+                update_init_section "CUSTOM" "$tcp_params" "$udp_params" "$init_script"
+                ;;
+        esac
+    done
+
+    print_success "Стратегии применены к init скрипту"
+
+    # Перезапустить сервис
+    print_info "Перезапуск сервиса..."
+    "$init_script" restart >/dev/null 2>&1
+
+    sleep 2
+
+    if is_zapret2_running; then
+        print_success "Сервис перезапущен с новыми стратегиями"
+        return 0
+    else
+        print_warning "Сервис не запустился, проверьте логи"
+        return 1
+    fi
+}
+
+# Обновить секцию в init скрипте для конкретной категории
+update_init_section() {
+    local marker=$1
+    local tcp_params=$2
+    local udp_params=$3
+    local init_script=$4
+
+    local start_marker="${marker}_MARKER_START"
+    local end_marker="${marker}_MARKER_END"
+
+    # Создать временный файл
+    local temp_file="${init_script}.tmp"
+
+    # Флаг - внутри ли мы секции для замены
+    local inside_section=0
+    local found_section=0
+
+    while IFS= read -r line; do
+        if echo "$line" | grep -q "# ${start_marker}"; then
+            # Начало секции - записать маркер и новые параметры
+            echo "$line"
+            echo "${marker}_TCP=\"${tcp_params}\""
+            echo "${marker}_UDP=\"${udp_params}\""
+            inside_section=1
+            found_section=1
+        elif echo "$line" | grep -q "# ${end_marker}"; then
+            # Конец секции - записать маркер и выйти из режима
+            echo "$line"
+            inside_section=0
+        elif [ "$inside_section" -eq 0 ]; then
+            # Вне секции - просто копировать
+            echo "$line"
+        fi
+        # Внутри секции - пропускать старые строки (кроме маркеров)
+    done < "$init_script" > "$temp_file"
+
+    # Если секции не было в файле - добавить в конец
+    if [ "$found_section" -eq 0 ]; then
+        {
+            echo ""
+            echo "# ${start_marker}"
+            echo "${marker}_TCP=\"${tcp_params}\""
+            echo "${marker}_UDP=\"${udp_params}\""
+            echo "# ${end_marker}"
+        } >> "$temp_file"
+    fi
+
+    # Заменить init скрипт
+    mv "$temp_file" "$init_script" || {
+        print_error "Не удалось обновить init скрипт"
+        return 1
+    }
+
+    chmod +x "$init_script"
+}
 
 # ==============================================================================
 # АВТОТЕСТ QUIC СТРАТЕГИЙ
@@ -1139,6 +1533,19 @@ auto_test_quic() {
         return 1
     fi
 
+    local config_file="${CONFIG_DIR}/category_strategies.conf"
+    local current_yt_tcp="1"
+    local current_yt_gv="1"
+    local current_rkn="1"
+    if [ -f "$config_file" ]; then
+        current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        [ -z "$current_yt_tcp" ] && current_yt_tcp="1"
+        [ -z "$current_yt_gv" ] && current_yt_gv="1"
+        [ -z "$current_rkn" ] && current_rkn="1"
+    fi
+
     local original_quic
     original_quic=$(get_current_quic_strategy)
 
@@ -1148,10 +1555,7 @@ auto_test_quic() {
         printf "\n[%d/%d] Тестирование QUIC стратегии #%s...\n" "$tested" "$total" "$num"
 
         set_current_quic_strategy "$num"
-        . "${LIB_DIR}/config_official.sh"
-        update_nfqws2_opt_in_config "${ZAPRET2_DIR:-/opt/zapret2}/config" >/dev/null 2>&1
-        local init_script="${Z2K_INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
-        [ -f "$init_script" ] && "$init_script" restart >/dev/null 2>&1 || {
+        apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn" >/dev/null 2>&1 || {
             print_warning "Не удалось применить QUIC стратегию #$num"
             continue
         }
@@ -1177,9 +1581,7 @@ auto_test_quic() {
 
     if [ -n "$original_quic" ]; then
         set_current_quic_strategy "$original_quic"
-        . "${LIB_DIR}/config_official.sh"
-        update_nfqws2_opt_in_config "${ZAPRET2_DIR:-/opt/zapret2}/config" >/dev/null 2>&1 || true
-        [ -f "$init_script" ] && "$init_script" restart >/dev/null 2>&1 || true
+        apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn" >/dev/null 2>&1 || true
     fi
 
     printf "\n"
@@ -1193,16 +1595,9 @@ auto_test_quic() {
         return 1
     fi
 
-    _apply_quic_choice() {
-        set_current_quic_strategy "$best_strategy"
-        . "${LIB_DIR}/config_official.sh"
-        update_nfqws2_opt_in_config "${ZAPRET2_DIR:-/opt/zapret2}/config" >/dev/null 2>&1
-        local _init="${Z2K_INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
-        [ -f "$_init" ] && "$_init" restart >/dev/null 2>&1
-    }
-
     if [ "$auto_mode" -eq 1 ]; then
-        _apply_quic_choice
+        set_current_quic_strategy "$best_strategy"
+        apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
         print_success "QUIC стратегия #$best_strategy применена автоматически"
         return 0
     fi
@@ -1216,16 +1611,247 @@ auto_test_quic() {
             return 0
             ;;
         *)
-            _apply_quic_choice
+            set_current_quic_strategy "$best_strategy"
+            apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
             print_success "QUIC стратегия применена"
             return 0
             ;;
     esac
 }
 
+# Получить текущие TCP параметры из init скрипта для секции
+get_init_tcp_params() {
+    local marker=$1
+    local init_script=$2
+
+    if [ ! -f "$init_script" ]; then
+        return 1
+    fi
+
+    local line
+    line=$(grep "^${marker}_TCP=" "$init_script" 2>/dev/null | head -n 1)
+    echo "$line" | sed "s/^${marker}_TCP=\"//" | sed 's/\"$//'
+}
+
+# Получить текущие UDP параметры из init скрипта для секции
+get_init_udp_params() {
+    local marker=$1
+    local init_script=$2
+
+    if [ ! -f "$init_script" ]; then
+        return 1
+    fi
+
+    local line
+    line=$(grep "^${marker}_UDP=" "$init_script" 2>/dev/null | head -n 1)
+    echo "$line" | sed "s/^${marker}_UDP=\"//" | sed 's/\"$//'
+}
+
+# Применить разные стратегии для YouTube TCP, YouTube GV, RKN (Z4R метод)
+# Параметры: номера стратегий для каждой категории
+apply_category_strategies_v2() {
+    local yt_tcp_strategy=$1
+    local yt_gv_strategy=$2
+    local rkn_strategy=$3
+
+    local zapret_config="${ZAPRET2_DIR:-/opt/zapret2}/config"
+    local init_script="${INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
+
+    print_info "Применение стратегий по категориям..."
+    print_info "  YouTube TCP -> стратегия #$yt_tcp_strategy"
+    print_info "  YouTube GV  -> стратегия #$yt_gv_strategy"
+    print_info "  RKN         -> стратегия #$rkn_strategy"
+
+    # Получить параметры для каждой стратегии
+    local yt_tcp_params
+    yt_tcp_params=$(get_strategy "$yt_tcp_strategy")
+    if [ -z "$yt_tcp_params" ]; then
+        print_warning "Стратегия #$yt_tcp_strategy не найдена, используется дефолтная"
+        yt_tcp_params="--lua-desync=fake:blob=fake_default_tls:repeats=6"
+    fi
+
+    local yt_gv_params
+    yt_gv_params=$(get_strategy "$yt_gv_strategy")
+    if [ -z "$yt_gv_params" ]; then
+        print_warning "Стратегия #$yt_gv_strategy не найдена, используется дефолтная"
+        yt_gv_params="--lua-desync=fake:blob=fake_default_tls:repeats=6"
+    fi
+
+    local rkn_params
+    rkn_params=$(get_strategy "$rkn_strategy")
+    if [ -z "$rkn_params" ]; then
+        print_warning "Стратегия #$rkn_strategy не найдена, используется дефолтная"
+        rkn_params="--lua-desync=fake:blob=fake_default_tls:repeats=6"
+    fi
+
+    # Формировать полные параметры TCP для каждой категории
+    local yt_tcp_full
+    local yt_gv_full
+    local rkn_full
+    yt_tcp_full=$(build_tls_profile_params "$yt_tcp_params")
+    yt_gv_full=$(build_tls_profile_params "$yt_gv_params")
+    rkn_full=$(build_tls_profile_params "$rkn_params")
+
+    # QUIC параметры (единый профиль)
+    local udp_quic
+    udp_quic=$(get_current_quic_profile_params)
+
+    # Сохранить стратегии в файлы категорий (config-driven)
+    print_info "Сохранение стратегий в файлы категорий..."
+    save_strategy_to_category "YT" "TCP" "$yt_tcp_full" || return 1
+    save_strategy_to_category "YT_GV" "TCP" "$yt_gv_full" || return 1
+    save_strategy_to_category "RKN" "TCP" "$rkn_full" || return 1
+    save_strategy_to_category "YT" "UDP" "$udp_quic" || return 1
+    save_strategy_to_category "RUTRACKER" "UDP" "$udp_quic" || return 1
+
+    # Обновить config файл (NFQWS2_OPT секцию)
+    print_info "Обновление config файла..."
+    . "${LIB_DIR}/config_official.sh" || {
+        print_error "Не удалось загрузить config_official.sh"
+        return 1
+    }
+
+    update_nfqws2_opt_in_config "$zapret_config" || {
+        print_error "Не удалось обновить config файл"
+        return 1
+    }
+
+    # Сохранить выбранные стратегии в конфигурацию
+    save_category_strategies "$yt_tcp_strategy" "$yt_gv_strategy" "$rkn_strategy"
+
+    print_success "Стратегии применены"
+
+    # Перезапустить сервис
+    print_info "Перезапуск сервиса..."
+    "$init_script" restart >/dev/null 2>&1
+
+    sleep 2
+
+    if ! is_zapret2_running; then
+        # Иногда nfqws2 стартует с задержкой
+        sleep 2
+    fi
+
+    if is_zapret2_running; then
+        print_success "Сервис перезапущен с новыми стратегиями"
+        return 0
+    else
+        print_error "Сервис не запустился, проверьте логи"
+        return 1
+    fi
+}
+
+# Сохранить стратегии по категориям (YouTube TCP/GV/RKN)
+save_category_strategies() {
+    local yt_tcp_strategy=$1
+    local yt_gv_strategy=$2
+    local rkn_strategy=$3
+    local config_file="${CONFIG_DIR}/category_strategies.conf"
+
+    mkdir -p "$CONFIG_DIR" 2>/dev/null
+
+    cat > "$config_file" <<EOF
+# Category Strategies Configuration (Z4R format)
+# Format: CATEGORY:STRATEGY_NUM
+# Updated: $(date)
+
+youtube_tcp:${yt_tcp_strategy}
+youtube_gv:${yt_gv_strategy}
+rkn:${rkn_strategy}
+EOF
+}
+
+# ==============================================================================
+# ПРИМЕНЕНИЕ ДЕФОЛТНЫХ СТРАТЕГИЙ
+# ==============================================================================
+
+# Применить набор стратегий по уровню (soft/medium/aggressive)
+apply_tiered_strategies() {
+    local tier="$1"
+    local auto_mode=0
+
+    if [ "$2" = "--auto" ]; then
+        auto_mode=1
+    fi
+
+    local yt_tcp=""
+    local yt_gv=""
+    local rkn=""
+    local quic=""
+
+    case "$tier" in
+        soft)
+            yt_tcp=1; yt_gv=4; rkn=7; quic=1
+            print_header "Применение мягких стратегий"
+            ;;
+        medium)
+            yt_tcp=2; yt_gv=5; rkn=8; quic=2
+            print_header "Применение средних стратегий"
+            ;;
+        aggressive)
+            yt_tcp=3; yt_gv=6; rkn=9; quic=3
+            print_header "Применение агрессивных стратегий"
+            ;;
+        *)
+            print_error "Неизвестный уровень: $tier"
+            return 1
+            ;;
+    esac
+
+    print_info "Будут применены следующие стратегии:"
+    print_info "  YouTube TCP: #$yt_tcp"
+    print_info "  YouTube GV:  #$yt_gv"
+    print_info "  RKN:         #$rkn"
+    print_info "  YouTube QUIC: #$quic"
+    printf "\n"
+
+    if [ "$auto_mode" -eq 0 ]; then
+        if ! confirm "Применить выбранный набор стратегий?"; then
+            print_info "Отменено"
+            return 0
+        fi
+    fi
+
+    if ! strategy_exists "$yt_tcp"; then
+        print_warning "Стратегия #$yt_tcp не найдена, используется #1"
+        yt_tcp=1
+    fi
+    if ! strategy_exists "$yt_gv"; then
+        print_warning "Стратегия #$yt_gv не найдена, используется #1"
+        yt_gv=1
+    fi
+    if ! strategy_exists "$rkn"; then
+        print_warning "Стратегия #$rkn не найдена, используется #1"
+        rkn=1
+    fi
+
+    apply_category_strategies_v2 "$yt_tcp" "$yt_gv" "$rkn"
+
+    if quic_strategy_exists "$quic"; then
+        set_current_quic_strategy "$quic"
+    else
+        print_warning "QUIC стратегия #$quic не найдена, оставляю текущую"
+    fi
+
+    return 0
+}
+
+# Применить мягкие стратегии (по умолчанию)
+apply_default_strategies() {
+    apply_tiered_strategies soft "$@"
+}
+
+# Применить средние стратегии
+apply_medium_strategies() {
+    apply_tiered_strategies medium "$@"
+}
+
+# Применить агрессивные стратегии (совместимость)
+apply_new_default_strategies() {
+    apply_tiered_strategies aggressive "$@"
+}
 
 # Применить autocircular стратегии (автоперебор внутри профиля)
-# Динамически находит стратегии с circular оркестратором по имени в базе
 apply_autocircular_strategies() {
     local auto_mode=0
 
@@ -1233,47 +1859,17 @@ apply_autocircular_strategies() {
         auto_mode=1
     fi
 
+    local yt_tcp=10
+    local yt_gv=11
+    local rkn=12
+    local quic=7
+
     print_header "Применение autocircular стратегий"
-
-    # Динамический поиск TCP autocircular стратегии
-    local tcp_num
-    tcp_num=$(find_strategy_by_name "manual_autocircular")
-    if [ -z "$tcp_num" ]; then
-        print_warning "Autocircular TCP стратегия не найдена в базе, используется #1"
-        tcp_num=1
-    fi
-
-    # Динамический поиск QUIC autocircular стратегии
-    local quic_num
-    quic_num=$(find_quic_strategy_by_name "yt_quic_autocircular")
-    if [ -z "$quic_num" ]; then
-        print_warning "Autocircular QUIC стратегия не найдена в базе, используется #1"
-        quic_num=1
-    fi
-
-    # Показать информацию о найденных стратегиях
-    local tcp_params
-    tcp_params=$(get_strategy "$tcp_num")
-    if [ -n "$tcp_params" ]; then
-        case "$tcp_params" in
-            *"--lua-desync=circular:"*)
-                print_info "  TCP: #$tcp_num (circular, $(echo "$tcp_params" | grep -o 'strategy=[0-9]*' | wc -l) вариантов)" ;;
-            *)
-                print_info "  TCP: #$tcp_num (без circular оркестратора)" ;;
-        esac
-    fi
-
-    local quic_params
-    quic_params=$(get_quic_strategy "$quic_num" 2>/dev/null)
-    if [ -n "$quic_params" ]; then
-        case "$quic_params" in
-            *"--lua-desync=circular:"*)
-                print_info "  QUIC: #$quic_num (circular, $(echo "$quic_params" | grep -o 'strategy=[0-9]*' | wc -l) вариантов)" ;;
-            *)
-                print_info "  QUIC: #$quic_num (без circular оркестратора)" ;;
-        esac
-    fi
-
+    print_info "Будут применены следующие стратегии:"
+    print_info "  YouTube TCP: #$yt_tcp"
+    print_info "  YouTube GV:  #$yt_gv"
+    print_info "  RKN:         #$rkn"
+    print_info "  YouTube QUIC: #$quic"
     printf "\n"
 
     if [ "$auto_mode" -eq 0 ]; then
@@ -1283,410 +1879,26 @@ apply_autocircular_strategies() {
         fi
     fi
 
-    # Применить TCP стратегию
-    apply_strategy_simple "$tcp_num"
-
-    # Применить QUIC стратегию
-    if quic_strategy_exists "$quic_num"; then
-        set_current_quic_strategy "$quic_num"
-    else
-        print_warning "QUIC стратегия #$quic_num не найдена, оставляю текущую"
+    if ! strategy_exists "$yt_tcp"; then
+        print_warning "Стратегия #$yt_tcp не найдена, используется #1"
+        yt_tcp=1
+    fi
+    if ! strategy_exists "$yt_gv"; then
+        print_warning "Стратегия #$yt_gv не найдена, используется #1"
+        yt_gv=1
+    fi
+    if ! strategy_exists "$rkn"; then
+        print_warning "Стратегия #$rkn не найдена, используется #1"
+        rkn=1
     fi
 
-    # Перегенерировать config с обеими стратегиями
-    . "${LIB_DIR}/config_official.sh"
-    update_nfqws2_opt_in_config "${ZAPRET2_DIR:-/opt/zapret2}/config" || return 1
+    apply_category_strategies_v2 "$yt_tcp" "$yt_gv" "$rkn"
 
-    # Перезапустить сервис
-    local init_script="${Z2K_INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
-    [ -f "$init_script" ] && "$init_script" restart >/dev/null 2>&1
-    sleep 2
-
-    if is_zapret2_running; then
-        print_success "Autocircular стратегии применены"
+    if quic_strategy_exists "$quic"; then
+        set_current_quic_strategy "$quic"
     else
-        print_warning "Сервис не запустился"
+        print_warning "QUIC стратегия #$quic не найдена, оставляю текущую"
     fi
 
     return 0
-}
-
-# ==============================================================================
-# КОНСТРУКТОР CIRCULAR СТРАТЕГИЙ
-# ==============================================================================
-
-# Парсинг диапазона: "1,3,5-10,15" → "1 3 5 6 7 8 9 10 15"
-parse_strategy_range() {
-    local input=$1
-    local result=""
-    local items
-    items=$(echo "$input" | tr ',' ' ')
-
-    for item in $items; do
-        case "$item" in
-            *-*)
-                local range_start range_end
-                range_start=$(echo "$item" | cut -d'-' -f1)
-                range_end=$(echo "$item" | cut -d'-' -f2)
-                case "$range_start$range_end" in *[!0-9]*) continue ;; esac
-                [ "$range_start" -gt "$range_end" ] 2>/dev/null && continue
-                local i=$range_start
-                while [ "$i" -le "$range_end" ]; do
-                    result="$result $i"
-                    i=$((i + 1))
-                done
-                ;;
-            *)
-                case "$item" in *[!0-9]*) continue ;; esac
-                [ -n "$item" ] && result="$result $item"
-                ;;
-        esac
-    done
-    echo "$result" | sed 's/^ *//'
-}
-
-# Извлечь --lua-desync=... инстансы из параметров стратегии
-extract_desync_instances() {
-    local params=$1
-    local result=""
-    local rest="$params"
-
-    while true; do
-        case "$rest" in
-            *"--lua-desync="*)
-                rest="${rest#*--lua-desync=}"
-                local value
-                case "$rest" in
-                    *" --"*) value="${rest%% --*}"; rest="${rest#* }" ;;
-                    *) value="$rest"; rest="" ;;
-                esac
-                result="$result --lua-desync=$value"
-                ;;
-            *) break ;;
-        esac
-    done
-    echo "$result" | sed 's/^ *//'
-}
-
-# Собрать circular TCP стратегию из набора
-# $1 - номера стратегий (пробел), $2 - fails, $3 - time
-build_circular_params() {
-    local strategy_nums=$1
-    local fails=${2:-2}
-    local time_sec=${3:-60}
-
-    local prefix="--filter-tcp=443,2053,2083,2087,2096,8443 --filter-l7=tls --payload=tls_client_hello --out-range=-n10"
-    local head="--lua-desync=circular:fails=${fails}:time=${time_sec}"
-    local instances=""
-    local sn=1
-
-    for num in $strategy_nums; do
-        local params
-        params=$(get_strategy "$num")
-        [ -z "$params" ] && continue
-
-        local desync_parts
-        desync_parts=$(extract_desync_instances "$params")
-        [ -z "$desync_parts" ] && continue
-
-        local part_rest="$desync_parts"
-        while true; do
-            case "$part_rest" in
-                *"--lua-desync="*)
-                    part_rest="${part_rest#*--lua-desync=}"
-                    local value
-                    case "$part_rest" in
-                        *" --lua-desync="*) value="${part_rest%% --lua-desync=*}"; part_rest="--lua-desync=${part_rest#* --lua-desync=}" ;;
-                        *) value="$part_rest"; part_rest="" ;;
-                    esac
-                    value=$(echo "$value" | sed 's/:strategy=[0-9]*//g')
-                    case "$value" in
-                        *":payload="*) ;;
-                        "circular:"*) ;;
-                        *) value="${value}:payload=tls_client_hello:dir=out" ;;
-                    esac
-                    case "$value" in
-                        "circular:"*) ;;
-                        *) instances="$instances --lua-desync=${value}:strategy=${sn}" ;;
-                    esac
-                    ;;
-                *) break ;;
-            esac
-        done
-        sn=$((sn + 1))
-    done
-
-    [ -z "$instances" ] && return 1
-    echo "${prefix} ${head}${instances}"
-}
-
-# Собрать circular QUIC стратегию
-# $1 - номера, $2 - fails, $3 - time, $4 - udp_in, $5 - udp_out
-build_quic_circular_params() {
-    local strategy_nums=$1
-    local fails=${2:-2}
-    local time_sec=${3:-60}
-    local udp_in=${4:-1}
-    local udp_out=${5:-4}
-
-    local prefix="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all"
-    local head="--lua-desync=circular:fails=${fails}:time=${time_sec}:udp_in=${udp_in}:udp_out=${udp_out}"
-    local instances=""
-    local sn=1
-
-    for num in $strategy_nums; do
-        local params
-        params=$(get_quic_strategy "$num" 2>/dev/null)
-        [ -z "$params" ] && continue
-
-        local desync_parts
-        desync_parts=$(extract_desync_instances "$params")
-        [ -z "$desync_parts" ] && continue
-
-        local part_rest="$desync_parts"
-        while true; do
-            case "$part_rest" in
-                *"--lua-desync="*)
-                    part_rest="${part_rest#*--lua-desync=}"
-                    local value
-                    case "$part_rest" in
-                        *" --lua-desync="*) value="${part_rest%% --lua-desync=*}"; part_rest="--lua-desync=${part_rest#* --lua-desync=}" ;;
-                        *) value="$part_rest"; part_rest="" ;;
-                    esac
-                    value=$(echo "$value" | sed 's/:strategy=[0-9]*//g')
-                    case "$value" in
-                        "circular:"*) ;;
-                        *":payload="*) instances="$instances --lua-desync=${value}:strategy=${sn}" ;;
-                        *) instances="$instances --lua-desync=${value}:payload=quic_initial:dir=out:strategy=${sn}" ;;
-                    esac
-                    ;;
-                *) break ;;
-            esac
-        done
-        sn=$((sn + 1))
-    done
-
-    [ -z "$instances" ] && return 1
-    echo "${prefix} ${head}${instances}"
-}
-
-# Параметры circular: загрузка/сохранение
-load_circular_params() {
-    CIRCULAR_FAILS=2; CIRCULAR_TIME=60; CIRCULAR_UDP_IN=1; CIRCULAR_UDP_OUT=4
-    [ -f "${CONFIG_DIR}/circular_params.conf" ] && . "${CONFIG_DIR}/circular_params.conf"
-}
-
-save_circular_params() {
-    mkdir -p "$CONFIG_DIR" 2>/dev/null
-    cat > "${CONFIG_DIR}/circular_params.conf" <<EOF
-CIRCULAR_FAILS=${CIRCULAR_FAILS:-2}
-CIRCULAR_TIME=${CIRCULAR_TIME:-60}
-CIRCULAR_UDP_IN=${CIRCULAR_UDP_IN:-1}
-CIRCULAR_UDP_OUT=${CIRCULAR_UDP_OUT:-4}
-EOF
-}
-
-# Состав circular: сохранение/загрузка
-save_circular_strategies() {
-    local category=$1 strategy_list=$2
-    local conf="${CONFIG_DIR}/circular_strategies.conf"
-    mkdir -p "$CONFIG_DIR" 2>/dev/null
-    local csv
-    csv=$(echo "$strategy_list" | tr ' ' ',')
-    if [ -f "$conf" ] && grep -q "^${category}:" "$conf" 2>/dev/null; then
-        sed -i "s|^${category}:.*|${category}:${csv}|" "$conf"
-    else
-        echo "${category}:${csv}" >> "$conf"
-    fi
-}
-
-load_circular_strategies() {
-    local category=$1
-    [ -f "${CONFIG_DIR}/circular_strategies.conf" ] && \
-        grep "^${category}:" "${CONFIG_DIR}/circular_strategies.conf" 2>/dev/null | cut -d':' -f2 | tr ',' ' '
-}
-
-# Применить custom circular TCP стратегию
-# В новой архитектуре circular записывается как стратегия и применяется через config
-apply_custom_circular() {
-    local category=$1 strategy_nums=$2
-    load_circular_params
-    local circular_params
-    circular_params=$(build_circular_params "$strategy_nums" "$CIRCULAR_FAILS" "$CIRCULAR_TIME") || {
-        print_error "Не удалось собрать circular"; return 1
-    }
-    local count
-    count=$(echo "$circular_params" | grep -o 'strategy=[0-9]*' | wc -l)
-    print_info "TCP Circular: $count вариантов (fails=$CIRCULAR_FAILS, time=$CIRCULAR_TIME)"
-    save_circular_strategies "TCP" "$strategy_nums"
-
-    # Сохранить параметры circular в конфиг и применить
-    mkdir -p "${CONFIG_DIR}" 2>/dev/null
-    echo "CUSTOM_CIRCULAR_TCP_PARAMS=$circular_params" > "${CONFIG_DIR}/custom_circular_tcp.conf"
-
-    . "${LIB_DIR}/config_official.sh"
-    update_nfqws2_opt_in_config "${ZAPRET2_DIR:-/opt/zapret2}/config" || return 1
-    local init_script="${Z2K_INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
-    [ -f "$init_script" ] && "$init_script" restart >/dev/null 2>&1
-}
-
-# Применить circular QUIC
-apply_custom_quic_circular() {
-    local strategy_nums=$1
-    load_circular_params
-    local circular_params
-    circular_params=$(build_quic_circular_params "$strategy_nums" "$CIRCULAR_FAILS" "$CIRCULAR_TIME" "$CIRCULAR_UDP_IN" "$CIRCULAR_UDP_OUT") || {
-        print_error "Не удалось собрать QUIC circular"; return 1
-    }
-    local count
-    count=$(echo "$circular_params" | grep -o 'strategy=[0-9]*' | wc -l)
-    print_info "QUIC Circular: $count вариантов"
-    save_circular_strategies "QUIC" "$strategy_nums"
-
-    mkdir -p "${CONFIG_DIR}" 2>/dev/null
-    echo "CUSTOM_CIRCULAR_QUIC_PARAMS=$circular_params" > "${CONFIG_DIR}/custom_circular_quic.conf"
-
-    . "${LIB_DIR}/config_official.sh"
-    update_nfqws2_opt_in_config "${ZAPRET2_DIR:-/opt/zapret2}/config" || return 1
-    local init_script="${Z2K_INIT_SCRIPT:-/opt/etc/init.d/S99zapret2}"
-    [ -f "$init_script" ] && "$init_script" restart >/dev/null 2>&1
-}
-
-# Показать текущий circular набор
-show_circular_info() {
-    print_header "Текущие circular стратегии"
-
-    # TCP стратегия
-    local tcp_num
-    tcp_num=$(find_strategy_by_name "manual_autocircular")
-    if [ -n "$tcp_num" ]; then
-        local p
-        p=$(get_strategy "$tcp_num")
-        case "$p" in
-            *"--lua-desync=circular:"*)
-                local c; c=$(echo "$p" | grep -o 'strategy=[0-9]*' | wc -l)
-                local fl; fl=$(echo "$p" | sed -n 's/.*circular:fails=\([0-9]*\).*/\1/p')
-                local t; t=$(echo "$p" | sed -n 's/.*:time=\([0-9]*\).*/\1/p')
-                printf "  TCP:     circular (%d вариантов, fails=%s, time=%s)\n" "$c" "$fl" "$t" ;;
-            *) printf "  TCP:     обычная стратегия #%s\n" "$tcp_num" ;;
-        esac
-    else
-        local cur; cur=$(get_current_strategy)
-        printf "  TCP:     стратегия #%s\n" "$cur"
-    fi
-
-    # QUIC стратегия
-    local quic_num
-    quic_num=$(get_current_quic_strategy)
-    local qp
-    qp=$(get_quic_strategy "$quic_num" 2>/dev/null)
-    if [ -n "$qp" ]; then
-        case "$qp" in
-            *"--lua-desync=circular:"*)
-                local c; c=$(echo "$qp" | grep -o 'strategy=[0-9]*' | wc -l)
-                local fl; fl=$(echo "$qp" | sed -n 's/.*circular:fails=\([0-9]*\).*/\1/p')
-                local t; t=$(echo "$qp" | sed -n 's/.*:time=\([0-9]*\).*/\1/p')
-                printf "  QUIC:    circular (%d вариантов, fails=%s, time=%s)\n" "$c" "$fl" "$t" ;;
-            *) printf "  QUIC:    обычная стратегия #%s\n" "$quic_num" ;;
-        esac
-    else
-        printf "  QUIC:    стратегия #%s\n" "$quic_num"
-    fi
-}
-
-# ==============================================================================
-# МОНИТОРИНГ NFQWS2
-# ==============================================================================
-
-send_nfqws2_signal() {
-    local sig=$1
-    is_zapret2_running || { print_error "nfqws2 не запущен"; return 1; }
-    local pid; pid=$(pgrep -f "nfqws2" | head -n 1)
-    [ -z "$pid" ] && { print_error "PID не найден"; return 1; }
-    kill -"$sig" "$pid" 2>/dev/null || { print_error "Ошибка отправки $sig"; return 1; }
-    print_success "Сигнал $sig отправлен (PID: $pid)"
-}
-
-# Чтение логов nfqws2 с платформо-зависимым источником
-_read_nfqws2_log() {
-    local lines=${1:-50}
-    if [ -f /opt/var/log/messages ]; then
-        grep -i "nfqws2" /opt/var/log/messages | tail -"$lines"
-    elif command -v logread >/dev/null 2>&1; then
-        logread 2>/dev/null | grep -i "nfqws2" | tail -"$lines"
-    elif [ -f /var/log/syslog ]; then
-        grep -i "nfqws2" /var/log/syslog | tail -"$lines"
-    elif command -v journalctl >/dev/null 2>&1; then
-        journalctl -u zapret2 --no-pager -n "$lines" 2>/dev/null
-    else
-        print_info "Лог не найден. Попробуйте: cat /opt/var/log/messages | grep nfqws2"
-    fi
-}
-
-show_circular_state() {
-    print_header "Состояние circular (SIGUSR2)"
-    send_nfqws2_signal USR2 || return 1
-    sleep 1
-    _read_nfqws2_log 30
-}
-
-show_conntrack_pool() {
-    print_header "Conntrack пул (SIGUSR1)"
-    send_nfqws2_signal USR1 || return 1
-    sleep 1
-    _read_nfqws2_log 50
-}
-
-show_nfqws2_logs() {
-    print_header "Логи nfqws2 (последние ${1:-50} строк)"
-    _read_nfqws2_log "${1:-50}"
-}
-
-# ==============================================================================
-# АВТОСБОРКА CIRCULAR ИЗ ТЕСТИРОВАНИЯ
-# ==============================================================================
-
-# Тестировать стратегии и вернуть рабочие
-auto_discover_working_strategies() {
-    local test_domain=${1:-"youtube.com"} strategy_nums=$2 min_score=${3:-3}
-    local working="" tested=0 total=0
-    for _ in $strategy_nums; do total=$((total + 1)); done
-
-    for num in $strategy_nums; do
-        tested=$((tested + 1))
-        printf "\r  [%d/%d] #%s..." "$tested" "$total" "$num" >&2
-        apply_strategy_simple "$num" >/dev/null 2>&1 || continue
-        sleep 3
-        local score; score=$(test_strategy_score)
-        if [ "$score" -ge "$min_score" ]; then
-            printf " OK (%d/5)\n" "$score" >&2
-            working="$working $num"
-        else
-            printf " (%d/5)\n" "$score" >&2
-        fi
-    done
-    printf "\n" >&2
-    echo "$working" | sed 's/^ *//'
-}
-
-# Автосборка circular для категории
-auto_build_circular() {
-    local category=$1 range=${2:-"1-12"} min_score=${3:-3}
-    local nums; nums=$(parse_strategy_range "$range")
-    [ -z "$nums" ] && { print_error "Неверный диапазон: $range"; return 1; }
-
-    local total; total=$(echo "$nums" | wc -w)
-    print_info "Тестирование $total стратегий для $category..."
-
-    local td
-    case "$category" in
-        YT) td="youtube.com" ;; YT_GV) td="googlevideo.com" ;; RKN) td="rutracker.org" ;; *) td="youtube.com" ;;
-    esac
-
-    local working; working=$(auto_discover_working_strategies "$td" "$nums" "$min_score")
-    [ -z "$working" ] && { print_warning "Рабочих стратегий не найдено"; return 1; }
-
-    local wc; wc=$(echo "$working" | wc -w)
-    print_success "Найдено $wc рабочих стратегий: $working"
-    apply_custom_circular "$category" "$working"
 }

@@ -9,7 +9,18 @@
 # Расширенные UDP порты для Discord voice/video (как в z4r)
 DISCORD_UDP_PORTS="443,50000:50099,1400,3478:3481,5349"
 
-# Discord домены включены в zapret-hosts-user.txt (через seed_standard_lists)
+# Домены Discord (будут загружены из discord.txt)
+DISCORD_DOMAINS="
+discord.com
+discord.gg
+discordapp.com
+discordapp.io
+discordapp.net
+discord.media
+discordcdn.com
+discordstatus.com
+discord-attachments-uploads-prd.storage.googleapis.com
+"
 
 # ==============================================================================
 # НАСТРОЙКА DISCORD VOICE/VIDEO
@@ -24,12 +35,12 @@ configure_discord_voice() {
         return 1
     fi
 
-    # Проверить наличие пользовательского списка доменов
-    if [ ! -f "$HOSTS_USER" ]; then
-        print_warning "Список доменов не найден: $HOSTS_USER"
-        print_info "Создаю seed-списки..."
-        seed_standard_lists || {
-            print_error "Не удалось создать списки"
+    # Проверить наличие списка Discord доменов
+    if [ ! -f "${LISTS_DIR}/discord.txt" ]; then
+        print_warning "Список discord.txt не найден"
+        print_info "Загружаю список доменов..."
+        download_domain_lists || {
+            print_error "Не удалось загрузить списки"
             return 1
         }
     fi
@@ -177,7 +188,7 @@ inject_discord_to_init() {
             udp_part=""
             in_new=0
 
-            for (i = 1; i <= length(lines); i++) {
+            for (i in lines) {
                 line = lines[i]
                 if (line ~ /^--new/) {
                     in_new=1
