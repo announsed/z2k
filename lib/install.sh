@@ -915,36 +915,24 @@ step_check_and_select_fwtype() {
 # ШАГ 8: ЗАГРУЗКА СПИСКОВ ДОМЕНОВ
 # ==============================================================================
 
-step_download_domain_lists() {
-    print_header "Шаг 8/12: Загрузка списков доменов"
+step_seed_domain_lists() {
+    print_header "Шаг 8/12: Настройка списков доменов"
 
-    # Использовать функцию из lib/config.sh
-    download_domain_lists || {
-        print_error "Не удалось загрузить списки доменов"
-        return 1
-    }
-
-    # Доп. проверка: список QUIC YT (zapret4rocket)
-    local yt_quic_list="/opt/zapret2/extra_strats/UDP/YT/List.txt"
-    if [ ! -s "$yt_quic_list" ]; then
-        print_warning "Список QUIC YT отсутствует или пустой: $yt_quic_list"
-        print_info "Попытка загрузить из zapret4rocket..."
-        local base_url="${Z4R_BASE_URL:-https://raw.githubusercontent.com/IndeecFOX/zapret4rocket/master}"
-        mkdir -p "$(dirname "$yt_quic_list")"
-        if curl -fsSL "$base_url/extra_strats/UDP/YT/List.txt" -o "$yt_quic_list"; then
-            if [ -s "$yt_quic_list" ]; then
-                print_success "Список QUIC YT загружен: $yt_quic_list"
-            else
-                print_warning "Список QUIC YT скачан, но пустой: $yt_quic_list"
-            fi
-        else
-            print_warning "Не удалось загрузить QUIC YT list из $base_url"
-        fi
-    fi
-    # Создать базовую конфигурацию
+    # Создать базовую конфигурацию и seed-списки
     create_base_config || {
         print_error "Не удалось создать конфигурацию"
         return 1
+    }
+
+    # Создать seed-списки доменов (zapret-hosts-user.txt и т.д.)
+    seed_standard_lists || {
+        print_warning "Не удалось создать seed-списки"
+    }
+
+    # Запустить стандартный ipset скрипт для загрузки курированных списков
+    print_info "Загрузка курированных списков доменов..."
+    run_getlist || {
+        print_warning "Не удалось загрузить списки (можно обновить позже через меню)"
     }
 
     print_success "Списки доменов и конфигурация установлены"
@@ -1094,19 +1082,9 @@ step_configure_tmpdir() {
 step_create_config_and_init() {
     print_header "Шаг 10/12: Создание config и init скрипта"
 
-    # ========================================================================
-    # 10.0: Создать дефолтные файлы стратегий
-    # ========================================================================
-
     # Source функции для работы со стратегиями
     . "${LIB_DIR}/strategies.sh" || {
         print_error "Не удалось загрузить strategies.sh"
-        return 1
-    }
-
-    # Создать директории и дефолтные файлы стратегий
-    create_default_strategy_files || {
-        print_error "Не удалось создать файлы стратегий"
         return 1
     }
 
@@ -1353,7 +1331,7 @@ step_finalize() {
     printf "  %-25s: %s\n" "Бинарник" "${ZAPRET2_DIR}/nfq2/nfqws2"
     printf "  %-25s: %s\n" "Init скрипт" "$INIT_SCRIPT"
     printf "  %-25s: %s\n" "Конфигурация" "$CONFIG_DIR"
-    printf "  %-25s: %s\n" "Списки доменов" "$LISTS_DIR"
+    printf "  %-25s: %s\n" "Списки доменов" "$IPSET_DIR"
     printf "  %-25s: %s\n" "Стратегии" "$STRATEGIES_CONF"
     printf "  %-25s: %s\n" "Tools" "${ZAPRET2_DIR}/nfq2"
 
@@ -1380,7 +1358,7 @@ run_full_install() {
     step_build_zapret2 || return 1                 # 5/12
     step_verify_installation || return 1           # 6/12
     step_check_and_select_fwtype || return 1       # ← НОВОЕ (7/12)
-    step_download_domain_lists || return 1         # 8/12
+    step_seed_domain_lists || return 1              # 8/12
     step_disable_hwnat_and_offload || return 1     # 9/12 (расширено)
     step_configure_tmpdir || return 1              # ← НОВОЕ (9.5/12)
     step_create_config_and_init || return 1        # 10/12

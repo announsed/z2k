@@ -3,281 +3,191 @@
 # Скачивание, обновление и управление списками для zapret2
 
 # ==============================================================================
-# УПРАВЛЕНИЕ СПИСКАМИ ДОМЕНОВ
+# УПРАВЛЕНИЕ СПИСКАМИ ДОМЕНОВ (СТАНДАРТНЫЙ IPSET)
 # ==============================================================================
 
-# Скачать списки доменов из zapret4rocket (z4r)
-download_domain_lists() {
-    print_header "Загрузка списков доменов"
-    print_info "Источник: zapret4rocket (master branch)"
-    print_info "Списки используются как есть, без модификаций"
+# Создать начальные списки доменов (seed) для стандартного ipset
+seed_standard_lists() {
+    print_header "Создание начальных списков доменов"
 
-    # Создать структуру директорий
-    local yt_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/YT"
-    local rkn_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/RKN"
-    local yt_udp_dir="${ZAPRET2_DIR}/extra_strats/UDP/YT"
-
-    mkdir -p "$yt_tcp_dir" "$rkn_tcp_dir" "$yt_udp_dir" "$LISTS_DIR" || {
-        print_error "Не удалось создать директории"
+    local ipset_dir="${IPSET_DIR:-${ZAPRET2_DIR}/ipset}"
+    mkdir -p "$ipset_dir" || {
+        print_error "Не удалось создать $ipset_dir"
         return 1
     }
 
-    # 1. YouTube TCP - загрузить из extra_strats/TCP/YT/List.txt
-    print_info "Загрузка YouTube TCP list..."
-    if curl -fsSL "${Z4R_BASE_URL}/extra_strats/TCP/YT/List.txt" -o "${yt_tcp_dir}/List.txt"; then
-        local count
-        count=$(wc -l < "${yt_tcp_dir}/List.txt" 2>/dev/null || echo "0")
-        print_success "YouTube TCP: $count доменов"
+    local hosts_user="${HOSTS_USER:-${ipset_dir}/zapret-hosts-user.txt}"
+    local hosts_exclude="${HOSTS_USER_EXCLUDE:-${ipset_dir}/zapret-hosts-user-exclude.txt}"
+
+    # Создать zapret-hosts-user.txt (seed домены)
+    if [ ! -f "$hosts_user" ]; then
+        cat > "$hosts_user" <<'EOF'
+# zapret-hosts-user.txt - Seed домены для autohostlist
+# Эти домены будут в списке сразу, без ожидания автоматического обнаружения
+
+# YouTube
+youtube.com
+youtu.be
+googlevideo.com
+ytimg.com
+ggpht.com
+googleapis.com
+gstatic.com
+
+# Discord
+discord.com
+discord.gg
+discordapp.com
+discord.media
+discordapp.net
+
+# RKN (known blocked)
+rutracker.org
+meduza.io
+facebook.com
+instagram.com
+twitter.com
+x.com
+EOF
+        print_success "Создан seed список: $hosts_user"
     else
-        print_error "Ошибка загрузки YouTube TCP list"
+        print_info "Seed список уже существует: $hosts_user"
     fi
 
-    # 2. YouTube GV - использует --hostlist-domains=googlevideo.com (список не нужен)
-    print_info "YouTube GV: используется --hostlist-domains=googlevideo.com"
+    # Создать zapret-hosts-user-exclude.txt (whitelist)
+    if [ ! -f "$hosts_exclude" ]; then
+        local whitelist="${LISTS_DIR}/whitelist.txt"
+        if [ -f "$whitelist" ]; then
+            # Копировать существующий whitelist
+            cp "$whitelist" "$hosts_exclude"
+            print_success "Whitelist скопирован в: $hosts_exclude"
+        else
+            cat > "$hosts_exclude" <<'EOF'
+# zapret-hosts-user-exclude.txt - Домены исключенные из обработки
+# Сервисы, которые могут работать некорректно с DPI bypass
 
-    # 3. RKN - загрузить из extra_strats/TCP/RKN/List.txt (БЕЗ модификаций)
-    print_info "Загрузка RKN list..."
-    if curl -fsSL "${Z4R_BASE_URL}/extra_strats/TCP/RKN/List.txt" -o "${rkn_tcp_dir}/List.txt"; then
-        local count
-        count=$(wc -l < "${rkn_tcp_dir}/List.txt" 2>/dev/null || echo "0")
-        print_success "RKN: $count доменов"
+# Социальные сети и медиа
+pinterest.com
+vkvideo.ru
+vk.com
+rutube.ru
+
+# E-commerce
+avito.ru
+
+# Стриминг
+netflix.com
+twitch.tv
+
+# Google API
+jnn-pa.googleapis.com
+
+# Gaming
+steamcommunity.com
+steampowered.com
+
+# Госуслуги
+gosuslugi.ru
+
+# Разработка
+raw.githubusercontent.com
+EOF
+            print_success "Создан exclude список: $hosts_exclude"
+        fi
     else
-        print_error "Ошибка загрузки RKN list"
+        print_info "Exclude список уже существует: $hosts_exclude"
     fi
 
-    # 4. QUIC YouTube - загрузить из extra_strats/UDP/YT/List.txt
-    print_info "Загрузка QUIC YouTube list..."
-    if curl -fsSL "${Z4R_BASE_URL}/extra_strats/UDP/YT/List.txt" -o "${yt_udp_dir}/List.txt"; then
-        local count
-        count=$(wc -l < "${yt_udp_dir}/List.txt" 2>/dev/null || echo "0")
-        print_success "QUIC YouTube: $count доменов"
-    else
-        print_warning "Не удалось загрузить QUIC YouTube list"
-    fi
-
-    # 5. Discord - загрузить из lists/russia-discord.txt
-    print_info "Загрузка Discord list..."
-    if curl -fsSL "${Z4R_LISTS_URL}/russia-discord.txt" -o "${LISTS_DIR}/discord.txt"; then
-        local count
-        count=$(wc -l < "${LISTS_DIR}/discord.txt" 2>/dev/null || echo "0")
-        print_success "Discord: $count доменов"
-    else
-        print_error "Ошибка загрузки Discord list"
-    fi
-
-    # 6. Custom - создать пустой файл для пользовательских доменов
-    if [ ! -f "${LISTS_DIR}/custom.txt" ]; then
-        touch "${LISTS_DIR}/custom.txt"
-        print_info "Создан custom.txt для пользовательских доменов"
-    fi
-
-    print_separator
-    print_success "Списки доменов загружены"
-
+    print_success "Начальные списки созданы"
     return 0
 }
 
-# Обновить списки доменов
-update_domain_lists() {
-    print_header "Обновление списков доменов"
-
-    # Скачать обновленные списки
-    download_domain_lists
-
-    # Показать статистику
-    print_separator
-    show_domain_lists_stats
-
-    # Перезагрузить списки через SIGHUP (без перезапуска сервиса)
-    if is_zapret2_running; then
-        printf "\nПерезагрузить списки в nfqws2? [Y/n]: "
-        read -r answer </dev/tty
-
-        case "$answer" in
-            [Nn]|[Nn][Oo])
-                print_info "Списки не перезагружены"
-                print_info "Перезагрузите вручную: killall -HUP nfqws2"
-                ;;
-            *)
-                print_info "Отправка SIGHUP для перезагрузки списков..."
-                local pid
-                pid=$(pgrep -f "nfqws2" | head -n 1)
-                if [ -n "$pid" ]; then
-                    kill -HUP "$pid" 2>/dev/null
-                    print_success "Списки перезагружены (SIGHUP отправлен, pid=$pid)"
-                else
-                    print_warning "Процесс nfqws2 не найден, перезапуск сервиса..."
-                    "$INIT_SCRIPT" restart
-                fi
-                ;;
-        esac
+# Запустить стандартный скрипт загрузки списков (get_config.sh / get_refilter_domains.sh)
+run_getlist() {
+    local getlist_script="${ZAPRET2_DIR}/ipset/get_config.sh"
+    if [ -x "$getlist_script" ]; then
+        print_info "Запуск $getlist_script..."
+        "$getlist_script"
+    else
+        print_warning "get_config.sh не найден или не исполняемый: $getlist_script"
+        print_info "Списки будут загружены автоматически при первом запуске cron"
     fi
-
-    return 0
 }
 
 # Показать статистику по спискам доменов
 show_domain_lists_stats() {
     print_header "Статистика списков доменов"
 
-    printf "%-30s | %-10s\n" "Список" "Доменов"
+    local ipset_dir="${IPSET_DIR:-${ZAPRET2_DIR}/ipset}"
+
+    printf "%-35s | %-10s\n" "Список" "Записей"
     print_separator
 
-    # YouTube TCP
-    local yt_tcp_list="${ZAPRET2_DIR}/extra_strats/TCP/YT/List.txt"
-    if [ -f "$yt_tcp_list" ]; then
+    # User hosts (seed)
+    local hosts_user="${HOSTS_USER:-${ipset_dir}/zapret-hosts-user.txt}"
+    if [ -f "$hosts_user" ]; then
         local count
-        count=$(wc -l < "$yt_tcp_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s\n" "YouTube TCP" "$count"
+        count=$(grep -v "^#" "$hosts_user" | grep -v "^$" | wc -l 2>/dev/null || echo "0")
+        printf "%-35s | %-10s\n" "zapret-hosts-user.txt (seed)" "$count"
     fi
 
-    # YouTube GV
-    printf "%-30s | %-10s\n" "YouTube GV" "--hostlist-domains"
-
-    # RKN
-    local rkn_list="${ZAPRET2_DIR}/extra_strats/TCP/RKN/List.txt"
-    if [ -f "$rkn_list" ]; then
+    # Exclude hosts
+    local hosts_exclude="${HOSTS_USER_EXCLUDE:-${ipset_dir}/zapret-hosts-user-exclude.txt}"
+    if [ -f "$hosts_exclude" ]; then
         local count
-        count=$(wc -l < "$rkn_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s\n" "RKN" "$count"
+        count=$(grep -v "^#" "$hosts_exclude" | grep -v "^$" | wc -l 2>/dev/null || echo "0")
+        printf "%-35s | %-10s\n" "zapret-hosts-user-exclude.txt" "$count"
     fi
 
-    # QUIC YouTube
-    local quic_yt_list="${ZAPRET2_DIR}/extra_strats/UDP/YT/List.txt"
-    if [ -f "$quic_yt_list" ]; then
+    # Auto-downloaded lists
+    local hosts_main="${ipset_dir}/zapret-hosts.txt.gz"
+    if [ -f "$hosts_main" ]; then
+        printf "%-35s | %-10s\n" "zapret-hosts.txt.gz (downloaded)" "есть"
+    elif [ -f "${ipset_dir}/zapret-hosts.txt" ]; then
         local count
-        count=$(wc -l < "$quic_yt_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s\n" "QUIC YouTube" "$count"
+        count=$(wc -l < "${ipset_dir}/zapret-hosts.txt" 2>/dev/null || echo "0")
+        printf "%-35s | %-10s\n" "zapret-hosts.txt (downloaded)" "$count"
     fi
 
-    # Discord
-    local discord_list="${LISTS_DIR}/discord.txt"
-    if [ -f "$discord_list" ]; then
+    # Auto-discovered hosts
+    local hosts_auto="${ipset_dir}/zapret-hosts-auto.txt"
+    if [ -f "$hosts_auto" ]; then
         local count
-        count=$(wc -l < "$discord_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s\n" "Discord" "$count"
-    fi
-
-    # Custom
-    local custom_list="${LISTS_DIR}/custom.txt"
-    if [ -f "$custom_list" ]; then
-        local count
-        count=$(wc -l < "$custom_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s\n" "Custom" "$count"
+        count=$(wc -l < "$hosts_auto" 2>/dev/null || echo "0")
+        printf "%-35s | %-10s\n" "zapret-hosts-auto.txt (auto)" "$count"
     fi
 
     print_separator
 }
 
-# Показать какие списки обрабатываются и режим работы
+# Показать активную конфигурацию обработки трафика
 show_active_processing() {
     print_header "Активная обработка трафика"
 
-    # Проверить режим ALL_TCP443
-    local all_tcp443_enabled=0
-    local all_tcp443_strategy=""
-    local all_tcp443_conf="${CONFIG_DIR}/all_tcp443.conf"
-
-    if [ -f "$all_tcp443_conf" ]; then
-        . "$all_tcp443_conf"
-        all_tcp443_enabled=$ENABLED
-        all_tcp443_strategy=$STRATEGY
-    fi
-
-    # Показать режим работы
-    print_info "Режим обработки трафика:"
-    printf "\n"
-
-    if [ "$all_tcp443_enabled" = "1" ]; then
-        print_warning "[WARN]  РЕЖИМ ALL TCP-443 ВКЛЮЧЕН"
-        printf "    Обрабатывается ВЕСЬ HTTPS трафик (порт 443)\n"
-        printf "    Стратегия: #%s\n" "$all_tcp443_strategy"
-        printf "    Списки доменов НЕ используются!\n"
-        print_separator
-    else
-        print_success "[OK] Режим по спискам доменов (нормальный)"
-        printf "\n"
-    fi
-
-    # Показать активные списки
-    print_info "Обрабатываемые списки доменов:"
-    print_separator
-    printf "%-30s | %-10s | %s\n" "Категория" "Доменов" "Статус"
-    print_separator
-
-    # RKN TCP
-    local rkn_list="${ZAPRET2_DIR}/extra_strats/TCP/RKN/List.txt"
-    if [ -f "$rkn_list" ]; then
-        local count
-        count=$(wc -l < "$rkn_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s | %s\n" "RKN (заблокированные)" "$count" "Активен"
-    fi
-
-    # YouTube TCP
-    local yt_tcp_list="${ZAPRET2_DIR}/extra_strats/TCP/YT/List.txt"
-    if [ -f "$yt_tcp_list" ]; then
-        local count
-        count=$(wc -l < "$yt_tcp_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s | %s\n" "YouTube TCP" "$count" "Активен"
-    fi
-
-    # YouTube GV
-    printf "%-30s | %-10s | %s\n" "YouTube GV (CDN)" "googlevideo.com" "Активен"
-
-    # QUIC YouTube
-    local quic_yt_list="${ZAPRET2_DIR}/extra_strats/UDP/YT/List.txt"
-    if [ -f "$quic_yt_list" ]; then
-        local count
-        count=$(wc -l < "$quic_yt_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s | %s\n" "QUIC YouTube (UDP 443)" "$count" "Активен"
-    fi
-
-    # Discord
-    local discord_list="${LISTS_DIR}/discord.txt"
-    if [ -f "$discord_list" ]; then
-        local count
-        count=$(wc -l < "$discord_list" 2>/dev/null || echo "0")
-        printf "%-30s | %-10s | %s\n" "Discord (TCP+UDP)" "$count" "Активен"
-    fi
-
-    # Custom
-    local custom_list="${LISTS_DIR}/custom.txt"
-    if [ -f "$custom_list" ]; then
-        local count
-        count=$(wc -l < "$custom_list" 2>/dev/null || echo "0")
-        local status="Пустой"
-        if [ "$count" -gt 0 ]; then
-            status="Активен"
-        fi
-        printf "%-30s | %-10s | %s\n" "Custom (пользовательские)" "$count" "$status"
-    fi
+    print_info "Режим: autohostlist (самообучение + списки)"
+    print_info "GETLIST: get_refilter_domains.sh"
+    print_info "Профили: 3 (TCP + QUIC + Discord UDP)"
 
     print_separator
 
-    # Показать исключения
-    print_info "Исключения (whitelist):"
-    local whitelist="${LISTS_DIR}/whitelist.txt"
-    if [ -f "$whitelist" ]; then
-        local count
-        count=$(grep -v "^#" "$whitelist" | grep -v "^$" | wc -l 2>/dev/null || echo "0")
-        printf "  %s доменов исключено из обработки\n" "$count"
-        printf "  Файл: %s\n" "$whitelist"
-    else
-        printf "  Whitelist не найден\n"
-    fi
+    printf "%-25s: %s\n" "TCP стратегия" "#$(get_current_strategy)"
+    printf "%-25s: %s\n" "QUIC стратегия" "#$(get_current_quic_strategy)"
+    printf "%-25s: %s\n" "Discord UDP" "фиксированная"
 
     print_separator
 
-    # Итого
-    if [ "$all_tcp443_enabled" = "1" ]; then
-        print_warning "ВНИМАНИЕ: Весь HTTPS трафик обрабатывается!"
-        print_info "Чтобы выключить: sh z2k.sh menu → [A] Режим ALL TCP-443"
-    else
-        print_success "Режим работы: только списки доменов (рекомендуется)"
+    # Исключения
+    local hosts_exclude="${HOSTS_USER_EXCLUDE:-${IPSET_DIR:-${ZAPRET2_DIR}/ipset}/zapret-hosts-user-exclude.txt}"
+    if [ -f "$hosts_exclude" ]; then
+        local count
+        count=$(grep -v "^#" "$hosts_exclude" | grep -v "^$" | wc -l 2>/dev/null || echo "0")
+        printf "Исключения: %s доменов\n" "$count"
     fi
+
+    print_separator
 }
 
-# Добавить домен в custom.txt
+# Добавить домен в zapret-hosts-user.txt
 add_custom_domain() {
     local domain=$1
 
@@ -286,46 +196,46 @@ add_custom_domain() {
         return 1
     fi
 
-    local custom_list="${LISTS_DIR}/custom.txt"
+    local hosts_user="${HOSTS_USER:-${IPSET_DIR:-${ZAPRET2_DIR}/ipset}/zapret-hosts-user.txt}"
 
     # Создать файл если не существует
-    if [ ! -f "$custom_list" ]; then
-        mkdir -p "$LISTS_DIR"
-        touch "$custom_list"
+    if [ ! -f "$hosts_user" ]; then
+        mkdir -p "$(dirname "$hosts_user")"
+        touch "$hosts_user"
     fi
 
     # Проверить, не существует ли уже
-    if grep -qx "$domain" "$custom_list" 2>/dev/null; then
+    if grep -qx "$domain" "$hosts_user" 2>/dev/null; then
         print_warning "Домен уже в списке: $domain"
         return 0
     fi
 
     # Добавить домен
-    echo "$domain" >> "$custom_list"
+    echo "$domain" >> "$hosts_user"
     print_success "Добавлен домен: $domain"
 
     return 0
 }
 
-# Удалить домен из custom.txt
+# Удалить домен из zapret-hosts-user.txt
 remove_custom_domain() {
     local domain=$1
-    local custom_list="${LISTS_DIR}/custom.txt"
+    local hosts_user="${HOSTS_USER:-${IPSET_DIR:-${ZAPRET2_DIR}/ipset}/zapret-hosts-user.txt}"
 
     if [ -z "$domain" ]; then
         print_error "Укажите домен для удаления"
         return 1
     fi
 
-    if [ ! -f "$custom_list" ]; then
-        print_error "Файл custom.txt не найден"
+    if [ ! -f "$hosts_user" ]; then
+        print_error "Файл zapret-hosts-user.txt не найден"
         return 1
     fi
 
     # Удалить домен
-    if grep -qx "$domain" "$custom_list"; then
-        grep -vx "$domain" "$custom_list" > "${custom_list}.tmp"
-        mv "${custom_list}.tmp" "$custom_list"
+    if grep -qx "$domain" "$hosts_user"; then
+        grep -vx "$domain" "$hosts_user" > "${hosts_user}.tmp"
+        mv "${hosts_user}.tmp" "$hosts_user"
         print_success "Удален домен: $domain"
     else
         print_warning "Домен не найден в списке: $domain"
@@ -334,37 +244,37 @@ remove_custom_domain() {
     return 0
 }
 
-# Показать custom.txt
+# Показать zapret-hosts-user.txt
 show_custom_domains() {
-    local custom_list="${LISTS_DIR}/custom.txt"
+    local hosts_user="${HOSTS_USER:-${IPSET_DIR:-${ZAPRET2_DIR}/ipset}/zapret-hosts-user.txt}"
 
-    print_header "Пользовательские домены"
+    print_header "Пользовательские домены (seed)"
 
-    if [ ! -f "$custom_list" ]; then
+    if [ ! -f "$hosts_user" ]; then
         print_info "Список пустой (файл не создан)"
         return 0
     fi
 
     local count
-    count=$(wc -l < "$custom_list" 2>/dev/null || echo "0")
+    count=$(grep -v "^#" "$hosts_user" | grep -v "^$" | wc -l 2>/dev/null || echo "0")
 
     if [ "$count" -eq 0 ]; then
         print_info "Список пустой"
     else
         print_info "Всего доменов: $count"
         print_separator
-        cat "$custom_list"
+        grep -v "^#" "$hosts_user" | grep -v "^$"
         print_separator
     fi
 
     return 0
 }
 
-# Очистить custom.txt
+# Очистить пользовательские домены из zapret-hosts-user.txt
 clear_custom_domains() {
-    local custom_list="${LISTS_DIR}/custom.txt"
+    local hosts_user="${HOSTS_USER:-${IPSET_DIR:-${ZAPRET2_DIR}/ipset}/zapret-hosts-user.txt}"
 
-    if [ ! -f "$custom_list" ]; then
+    if [ ! -f "$hosts_user" ]; then
         print_info "Список уже пустой"
         return 0
     fi
@@ -374,7 +284,7 @@ clear_custom_domains() {
 
     case "$answer" in
         [Yy]|[Yy][Ee][Ss])
-            > "$custom_list"
+            > "$hosts_user"
             print_success "Список очищен"
             ;;
         *)
@@ -430,95 +340,11 @@ create_base_config() {
         rm -f "$quic_category_conf"
     fi
 
-    # Создать конфиг для режима ALL_TCP443 (без хостлистов)
-    local all_tcp443_conf="${CONFIG_DIR}/all_tcp443.conf"
-    if [ ! -f "$all_tcp443_conf" ]; then
-        cat > "$all_tcp443_conf" <<'EOF'
-# Режим работы по ВСЕМ доменам TCP-443 без хостлистов
-# ВНИМАНИЕ: Этот режим применяет стратегию ко всему трафику HTTPS
-# Может замедлить соединения, но обходит любые блокировки
-
-# Включить режим: 1 = включен, 0 = выключен
-ENABLED=0
-
-# Номер стратегии для применения (1-199)
-STRATEGY=1
-EOF
-        print_success "Создан конфиг режима ALL_TCP443"
-    fi
+    # Создать директорию ipset и seed-файлы
+    seed_standard_lists
 
     # Создать директорию для списков если не существует
-    if ! mkdir -p "$LISTS_DIR" 2>/dev/null; then
-        print_error "Не удалось создать директорию: $LISTS_DIR"
-        print_info "Проверьте права доступа"
-        return 1
-    fi
-
-    # Проверить что директория действительно существует
-    if [ ! -d "$LISTS_DIR" ]; then
-        print_error "Директория не существует: $LISTS_DIR"
-        return 1
-    fi
-
-    # Создать whitelist для исключения критичных сервисов
-    local whitelist="${LISTS_DIR}/whitelist.txt"
-    if [ ! -f "$whitelist" ]; then
-        cat > "$whitelist" <<'EOF'
-# Whitelist - домены исключенные из обработки zapret2
-# Сервисы, которые могут работать некорректно с DPI bypass
-
-# Социальные сети и медиа
-pinterest.com
-vkvideo.ru
-vk.com
-rutube.ru
-
-# E-commerce и объявления
-avito.ru
-
-# Стриминг
-netflix.com
-vsetop.org
-twitch.tv
-ttvnw.net
-static-cdn.jtvnw.net
-
-# Google API
-jnn-pa.googleapis.com
-ogs.google.com
-encrypted-tbn0.gstatic.com
-encrypted-tbn1.gstatic.com
-encrypted-tbn2.gstatic.com
-encrypted-tbn3.gstatic.com
-
-# Gaming
-steamcommunity.com
-steampowered.com
-tarkov.com
-escapefromtarkov.com
-
-# Мониторинг и CDN
-browser-intake-datadoghq.com
-datadoghq.com
-okcdn.ru
-api.mycdn.me
-
-# Госуслуги
-gosuslugi.ru
-
-# Разработка
-raw.githubusercontent.com
-EOF
-
-        # Проверить что файл действительно создался
-        if [ ! -f "$whitelist" ]; then
-            print_error "Не удалось создать whitelist: $whitelist"
-            print_info "Проверьте права доступа к директории"
-            return 1
-        fi
-
-        print_success "Создан whitelist: $whitelist"
-    fi
+    mkdir -p "$LISTS_DIR" 2>/dev/null
 
     print_success "Базовая конфигурация создана"
     return 0
@@ -557,22 +383,17 @@ show_current_config() {
     fi
     print_separator
 
-    # Списки доменов
-    if [ -d "$LISTS_DIR" ]; then
-        print_info "Списки доменов:"
-        for list in discord.txt youtube.txt rkn.txt custom.txt; do
-            if [ -f "${LISTS_DIR}/${list}" ]; then
+    # Списки доменов (ipset)
+    local ipset_dir="${IPSET_DIR:-${ZAPRET2_DIR}/ipset}"
+    if [ -d "$ipset_dir" ]; then
+        print_info "Списки доменов (ipset):"
+        for list in zapret-hosts-user.txt zapret-hosts-user-exclude.txt zapret-hosts-auto.txt; do
+            if [ -f "${ipset_dir}/${list}" ]; then
                 local count
-                count=$(wc -l < "${LISTS_DIR}/${list}" 2>/dev/null || echo "0")
-                printf "  %-20s: %s доменов\n" "$list" "$count"
+                count=$(grep -v "^#" "${ipset_dir}/${list}" | grep -v "^$" | wc -l 2>/dev/null || echo "0")
+                printf "  %-35s: %s\n" "$list" "$count"
             fi
         done
-        local yt_quic_list="${ZAPRET2_DIR}/extra_strats/UDP/YT/List.txt"
-        if [ -f "$yt_quic_list" ]; then
-            local yt_quic_count
-            yt_quic_count=$(wc -l < "$yt_quic_list" 2>/dev/null || echo "0")
-            printf "  %-20s: %s доменов\n" "extra_strats/UDP/YT/List.txt" "$yt_quic_count"
-        fi
     else
         print_info "Списки доменов: не установлены"
     fi
@@ -600,11 +421,9 @@ reset_config() {
                 print_info "Сброшена текущая стратегия"
             fi
 
-            # Очистить custom.txt
-            if [ -f "${LISTS_DIR}/custom.txt" ]; then
-                > "${LISTS_DIR}/custom.txt"
-                print_info "Очищен список пользовательских доменов"
-            fi
+            # Пересоздать seed-списки
+            seed_standard_lists
+            print_info "Списки доменов пересозданы"
 
             print_success "Конфигурация сброшена"
 
