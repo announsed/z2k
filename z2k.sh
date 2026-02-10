@@ -20,7 +20,7 @@ export LIB_DIR
 export GITHUB_RAW
 
 # Список модулей для загрузки
-MODULES="utils system_init install strategies config config_official menu discord"
+MODULES="utils system_init install strategies config config_official menu"
 
 # ==============================================================================
 # ВСТРОЕННЫЕ FALLBACK ФУНКЦИИ
