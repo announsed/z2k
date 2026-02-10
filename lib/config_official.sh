@@ -45,11 +45,11 @@ generate_nfqws2_opt_from_strategies() {
     fi
 
     # Discord TCP: derived from RKN strategy (same strategies, different header)
-    # Like z2r: no --filter-l7=tls, circular_locked:key=4, payload=discord_ip_discovery
+    # No --filter-l7=tls (Discord uses non-TLS too), discord_ip_discovery in payload
+    # Keeps circular (auto-rotation) — circular_locked only needed for UDP (allow_nohost)
     if [ -n "$rkn_tcp" ]; then
         discord_tcp=$(echo "$rkn_tcp" | sed \
             -e 's/ --filter-l7=tls//' \
-            -e 's/--lua-desync=circular:fails/--lua-desync=circular_locked:key=4:fails/' \
             -e 's/--payload=tls_client_hello /--payload=tls_client_hello,discord_ip_discovery /')
     else
         # Fallback if RKN strategy not loaded
