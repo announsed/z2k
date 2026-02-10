@@ -134,7 +134,7 @@ $tcp_params
 --hostlist=${LISTS_DIR}/discord.txt
 --filter-l7=discord,stun
 --payload=stun,discord_ip_discovery
---out-range=-n10
+--out-range=-d100
 --lua-desync=fake:blob=0x00000000000000000000000000000000:repeats=2
 DISCORD_PROFILE
 
