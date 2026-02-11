@@ -61,7 +61,7 @@ create_default_strategy_files() {
     print_info "Создание дефолтных файлов стратегий..."
 
     # Дефолтная TCP стратегия
-    local default_tcp="--filter-tcp=443,2053,2083,2087,2096,8443 --filter-l7=tls --payload=tls_client_hello --out-range=-s34228 --lua-desync=fake:blob=fake_default_tls:repeats=4"
+    local default_tcp="--filter-tcp=443,2053,2083,2087,2096,8443 --filter-l7=tls --payload=tls_client_hello,http_req,http_reply,unknown,tls_server_hello --out-range=-s34228 --lua-desync=fake:blob=fake_default_tls:repeats=4"
 
     # Дефолтная UDP стратегия (QUIC)
     local default_udp="--filter-udp=443 --filter-l7=quic --payload=quic_initial --out-range=-d100 --lua-desync=fake:blob=fake_default_quic:repeats=3"
@@ -440,7 +440,9 @@ build_tls_profile_params() {
         prefix="${prefix} --filter-l7=tls"
     fi
     if ! params_has_payload "$params"; then
-        payload="--payload=tls_client_hello"
+        # z2r-style dual payload: wide scope for range/failure detection,
+        # narrow scope (tls_client_hello,http_req) for actual strategies
+        payload="--payload=tls_client_hello,http_req,http_reply,unknown,tls_server_hello"
     fi
 
     printf "%s %s %s" "$prefix" "$payload" "$params"
