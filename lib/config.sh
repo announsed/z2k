@@ -70,7 +70,7 @@ download_domain_lists() {
     print_info "Загрузка Discord TCP hostlist..."
     local discord_tcp_dir="${ZAPRET2_DIR}/extra_strats"
     mkdir -p "$discord_tcp_dir"
-    if curl -fsSL "${Z4R_BASE_URL}/extra_strats/TCP/RKN/Discord.txt" \
+    if curl -fsSL "${Z2R_BASE_URL}/extra_strats/TCP/RKN/Discord.txt" \
         -o "${discord_tcp_dir}/TCP_Discord.txt"; then
         local count
         count=$(wc -l < "${discord_tcp_dir}/TCP_Discord.txt" 2>/dev/null || echo "0")
