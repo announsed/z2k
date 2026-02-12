@@ -91,9 +91,18 @@ download_domain_lists() {
         print_info "Создан custom.txt для пользовательских доменов"
     fi
     # Seed Instagram domains into custom.txt (QUIC/HTTP3 apps often need UDP/443 bypass).
-    # Hostlists match subdomains automatically, so base domains are enough.
+    # Hostlists match subdomains automatically; wildcards (*) are not supported.
     local custom_list="${LISTS_DIR}/custom.txt"
-    for domain in instagram.com cdninstagram.com instagr.am ig.me; do
+    for domain in \
+        instagram.com \
+        cdninstagram.com \
+        ig.me \
+        igcdn.com \
+        instagram-engineering.com \
+        instagram-press.com \
+        instagramstatic-a.akamaihd.net \
+        instagr.am \
+    ; do
         grep -qxF "$domain" "$custom_list" 2>/dev/null || echo "$domain" >> "$custom_list"
     done
 
