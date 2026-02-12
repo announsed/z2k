@@ -166,6 +166,15 @@ local function seed_from_state(desync)
   return askey, hostn, hrec
 end
 
+local function clear_persisted(askey, hostn)
+  if not askey or not hostn then return end
+  if state[askey] and state[askey][hostn] then
+    state[askey][hostn] = nil
+    if next(state[askey]) == nil then state[askey] = nil end
+    write_state()
+  end
+end
+
 local function persist_if_changed(askey, hostn, hrec)
   if not askey or not hostn or not hrec or not hrec.nstrategy then return end
   local n = tonumber(hrec.nstrategy)
@@ -189,17 +198,50 @@ local function persist_if_changed(askey, hostn, hrec)
   write_state()
 end
 
+local function conn_record_flags(desync)
+  local tr = desync and desync.track
+  local ls = tr and tr.lua_state
+  local crec = ls and ls.automate
+  if not crec then return false, false end
+  return (crec.nocheck and true or false), (crec.failure and true or false)
+end
+
 -- Wrap circular() from zapret-auto.lua.
 if type(circular) == "function" then
   local orig_circular = circular
   circular = function(ctx, desync)
     local askey, hostn, hrec
+    local nocheck_before, failure_before = conn_record_flags(desync)
     pcall(function()
       askey, hostn, hrec = seed_from_state(desync)
     end)
+    local n_before = hrec and tonumber(hrec.nstrategy) or nil
     local verdict = orig_circular(ctx, desync)
     pcall(function()
-      persist_if_changed(askey, hostn, hrec)
+      -- Persist only when success is detected (not after a failure-induced rotation).
+      local nocheck_after, failure_after = conn_record_flags(desync)
+      local n_after = hrec and tonumber(hrec.nstrategy) or nil
+
+      -- If persisted state became incompatible with current strategy count (config changed),
+      -- normalize it to strategy 1 for the next connection and drop the persisted entry.
+      local ct = hrec and tonumber(hrec.ctstrategy) or nil
+      if ct and ct > 0 and n_after and (n_after < 1 or n_after > ct) then
+        hrec.nstrategy = 1
+        clear_persisted(askey, hostn)
+        return
+      end
+
+      -- If we rotated due to repeated failures, drop the persisted entry so we don't
+      -- keep reseeding a now-bad strategy after restarts.
+      if failure_after and n_before and n_after and n_before ~= n_after then
+        clear_persisted(askey, hostn)
+        return
+      end
+
+      local success_event = (not nocheck_before) and nocheck_after and (not failure_after)
+      if success_event then
+        persist_if_changed(askey, hostn, hrec)
+      end
     end)
     return verdict
   end
