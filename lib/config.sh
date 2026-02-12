@@ -90,6 +90,12 @@ download_domain_lists() {
         touch "${LISTS_DIR}/custom.txt"
         print_info "Создан custom.txt для пользовательских доменов"
     fi
+    # Seed Instagram domains into custom.txt (QUIC/HTTP3 apps often need UDP/443 bypass).
+    # Hostlists match subdomains automatically, so base domains are enough.
+    local custom_list="${LISTS_DIR}/custom.txt"
+    for domain in instagram.com cdninstagram.com instagr.am ig.me; do
+        grep -qxF "$domain" "$custom_list" 2>/dev/null || echo "$domain" >> "$custom_list"
+    done
 
     # 7. RuTracker QUIC - локальный список
     cat > "${rt_udp_dir}/List.txt" <<'EOF'
