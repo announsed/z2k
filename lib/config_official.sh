@@ -17,6 +17,7 @@ generate_nfqws2_opt_from_strategies() {
     local youtube_tcp_tcp=""
     local youtube_gv_tcp=""
     local rkn_tcp=""
+    local cf_tcp=""
     local quic_udp=""
     local quic_custom_udp=""
     local discord_tcp=""
@@ -34,6 +35,10 @@ generate_nfqws2_opt_from_strategies() {
 
     if [ -f "${extra_strats_dir}/TCP/RKN/Strategy.txt" ]; then
         rkn_tcp=$(cat "${extra_strats_dir}/TCP/RKN/Strategy.txt")
+    fi
+
+    if [ -f "${extra_strats_dir}/TCP/CF/Strategy.txt" ]; then
+        cf_tcp=$(cat "${extra_strats_dir}/TCP/CF/Strategy.txt")
     fi
 
     # YouTube QUIC: autocircular 20 strategies from quic_strats.ini [yt_quic_autocircular]
@@ -68,8 +73,45 @@ EOF
     [ -z "$youtube_tcp_tcp" ] && youtube_tcp_tcp="$default_strategy"
     [ -z "$youtube_gv_tcp" ] && youtube_gv_tcp="$default_strategy"
     [ -z "$rkn_tcp" ] && rkn_tcp="$default_strategy"
+    [ -z "$cf_tcp" ] && cf_tcp="$rkn_tcp"
     [ -z "$quic_custom_udp" ] && quic_custom_udp="--filter-udp=443 --filter-l7=quic --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
     custom_tcp="$default_strategy"
+
+    # Cloudflare runs in a dedicated, more aggressive circular profile.
+    # Keep strategy actions as-is, only normalize circular control arguments.
+    normalize_cf_circular() {
+        local input="$1"
+        local out=""
+        local token=""
+        local opts=""
+        local part=""
+        local rest=""
+        local old_ifs="$IFS"
+
+        for token in $input; do
+            case "$token" in
+                --lua-desync=circular:*)
+                    opts="${token#--lua-desync=circular:}"
+                    rest=""
+                    IFS=':'
+                    for part in $opts; do
+                        case "$part" in
+                            fails=*|retrans=*|time=*|key=*|nld=*) ;;
+                            *) rest="${rest:+$rest:}$part" ;;
+                        esac
+                    done
+                    IFS="$old_ifs"
+                    token="--lua-desync=circular:fails=1:retrans=1:time=30:key=cf_tcp:nld=2"
+                    [ -n "$rest" ] && token="$token:$rest"
+                    ;;
+            esac
+            out="${out:+$out }$token"
+        done
+
+        IFS="$old_ifs"
+        printf '%s' "$out"
+    }
+    cf_tcp=$(normalize_cf_circular "$cf_tcp")
 
     # Генерировать NFQWS2_OPT в формате официального config
     # ������������ NFQWS2_OPT � ������� ������������ config
@@ -86,9 +128,13 @@ EOF
         fi
     }
 
-    # RKN TCP (with Discord hostlist-exclude to avoid overlap with Discord TCP profile)
+    # Cloudflare TCP (isolated from RKN, with dedicated aggressive circular key=cf_tcp)
+    add_hostlist_line "${extra_strats_dir}/TCP/CF/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/TCP/CF/List.txt $cf_tcp --new"
+
+    # RKN TCP (with Discord/Cloudflare hostlist-exclude to avoid overlap with dedicated profiles)
     local rkn_exclude="--hostlist-exclude=${lists_dir}/whitelist.txt"
     [ -s "${extra_strats_dir}/TCP_Discord.txt" ] && rkn_exclude="$rkn_exclude --hostlist-exclude=${extra_strats_dir}/TCP_Discord.txt"
+    [ -s "${extra_strats_dir}/TCP/CF/List.txt" ] && rkn_exclude="$rkn_exclude --hostlist-exclude=${extra_strats_dir}/TCP/CF/List.txt"
     add_hostlist_line "${extra_strats_dir}/TCP/RKN/List.txt" "$rkn_exclude --hostlist=${extra_strats_dir}/TCP/RKN/List.txt $rkn_tcp --new"
 
     # YouTube TCP

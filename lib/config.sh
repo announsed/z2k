@@ -15,10 +15,11 @@ download_domain_lists() {
     # Создать структуру директорий
     local yt_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/YT"
     local rkn_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/RKN"
+    local cf_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/CF"
     local yt_udp_dir="${ZAPRET2_DIR}/extra_strats/UDP/YT"
     local rt_udp_dir="${ZAPRET2_DIR}/extra_strats/UDP/RUTRACKER"
 
-    mkdir -p "$yt_tcp_dir" "$rkn_tcp_dir" "$yt_udp_dir" "$rt_udp_dir" "$LISTS_DIR" || {
+    mkdir -p "$yt_tcp_dir" "$rkn_tcp_dir" "$cf_tcp_dir" "$yt_udp_dir" "$rt_udp_dir" "$LISTS_DIR" || {
         print_error "Не удалось создать директории"
         return 1
     }
@@ -45,6 +46,15 @@ download_domain_lists() {
     else
         print_error "Ошибка загрузки RKN list"
     fi
+
+    # 3.1. Cloudflare TCP - выделенный подсписок для отдельной ротации
+    # Subdomains match automatically, so base domains are enough.
+    cat > "${cf_tcp_dir}/List.txt" <<'EOF'
+cloudflare.com
+cloudflare-ech.com
+cloudflareclient.com
+EOF
+    print_success "Cloudflare TCP: создан выделенный список"
 
     # 4. QUIC YouTube - загрузить из extra_strats/UDP/YT/List.txt
     print_info "Загрузка QUIC YouTube list..."
@@ -96,6 +106,10 @@ download_domain_lists() {
     for domain in \
         instagram.com \
         cdninstagram.com \
+        graph.instagram.com \
+        api.instagram.com \
+        i.instagram.com \
+        static.cdninstagram.com \
         ig.me \
         igcdn.com \
         instagram-engineering.com \
@@ -186,6 +200,14 @@ show_domain_lists_stats() {
         printf "%-30s | %-10s\n" "RKN" "$count"
     fi
 
+    # Cloudflare TCP
+    local cf_list="${ZAPRET2_DIR}/extra_strats/TCP/CF/List.txt"
+    if [ -f "$cf_list" ]; then
+        local count
+        count=$(wc -l < "$cf_list" 2>/dev/null || echo "0")
+        printf "%-30s | %-10s\n" "Cloudflare TCP" "$count"
+    fi
+
     # QUIC YouTube
     local quic_yt_list="${ZAPRET2_DIR}/extra_strats/UDP/YT/List.txt"
     if [ -f "$quic_yt_list" ]; then
@@ -269,6 +291,14 @@ show_active_processing() {
         local count
         count=$(wc -l < "$rkn_list" 2>/dev/null || echo "0")
         printf "%-30s | %-10s | %s\n" "RKN (заблокированные)" "$count" "Активен"
+    fi
+
+    # Cloudflare TCP
+    local cf_list="${ZAPRET2_DIR}/extra_strats/TCP/CF/List.txt"
+    if [ -f "$cf_list" ]; then
+        local count
+        count=$(wc -l < "$cf_list" 2>/dev/null || echo "0")
+        printf "%-30s | %-10s | %s\n" "Cloudflare TCP" "$count" "Активен"
     fi
 
     # YouTube TCP
