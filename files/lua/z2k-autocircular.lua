@@ -303,11 +303,16 @@ if type(circular) == "function" then
         askey_after, hostn_after, hrec_after = get_record_for_desync(desync, false)
       end)
 
-      -- Host key can change over connection lifetime (e.g. IP -> hostname when parser learns host).
-      -- Prefer post-call record to capture strategy chosen by original circular().
-      local askey = askey_after or askey_before
-      local hostn = hostn_after or hostn_before
-      local hrec = hrec_after or hrec_before
+      -- For persistence we must stay bound to circular() host record key (askey_before).
+      -- askey_after can point to an executed instance (e.g. fake_1_2), not to circular state.
+      local askey = askey_before or askey_after
+      local hostn = hostn_before or hostn_after
+      local hrec = hrec_before
+      if (not hrec or not hrec.nstrategy) and hrec_after and hrec_after.nstrategy then
+        hrec = hrec_after
+      elseif not hrec then
+        hrec = hrec_after
+      end
       if not hrec then return end
 
       local nocheck_after, failure_after = conn_record_flags(desync)
