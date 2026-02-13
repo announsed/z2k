@@ -202,13 +202,9 @@ local function persist_if_changed(askey, hostn, hrec)
   local n = tonumber(hrec.nstrategy)
   if not n or n < 1 then return end
 
-  -- Strategy "1" is default. Don't persist it. If it was previously persisted, delete the record.
+  -- Strategy "1" is default. Do not overwrite or delete stored state with it:
+  -- keep the last known successful non-default strategy so restarts don't "forget" it.
   if n == 1 then
-    if state[askey] and state[askey][hostn] then
-      state[askey][hostn] = nil
-      if next(state[askey]) == nil then state[askey] = nil end
-      write_state()
-    end
     return
   end
 
