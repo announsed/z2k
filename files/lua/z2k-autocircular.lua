@@ -14,12 +14,20 @@
 local STATE_DIR_PRIMARY = "/opt/zapret2/extra_strats/cache/autocircular"
 local STATE_FILE_PRIMARY = STATE_DIR_PRIMARY .. "/state.tsv"
 local STATE_FILE_FALLBACK = "/tmp/z2k-autocircular-state.tsv"
+local DEBUG_FLAG_PRIMARY = STATE_DIR_PRIMARY .. "/debug.flag"
+local DEBUG_FLAG_FALLBACK = "/tmp/z2k-autocircular-debug.flag"
+local DEBUG_LOG_PRIMARY = STATE_DIR_PRIMARY .. "/debug.log"
+local DEBUG_LOG_FALLBACK = "/tmp/z2k-autocircular-debug.log"
 
 local loaded = false
 local state = {} -- state[askey][host_norm] = { strategy = N, ts = unix_time }
 
 local last_write = 0
 local write_interval = 2 -- seconds
+
+local debug_enabled = false
+local debug_checked_at = 0
+local debug_refresh_interval = 5 -- seconds
 
 local function is_blank(s)
   return (s == nil) or (tostring(s) == "")
@@ -39,6 +47,48 @@ local function choose_state_file_for_read()
   f = io.open(STATE_FILE_FALLBACK, "r")
   if f then f:close(); return STATE_FILE_FALLBACK end
   return nil
+end
+
+local function choose_debug_log_file_for_write()
+  local f = io.open(DEBUG_LOG_PRIMARY, "a")
+  if f then f:close(); return DEBUG_LOG_PRIMARY end
+  f = io.open(DEBUG_LOG_FALLBACK, "a")
+  if f then f:close(); return DEBUG_LOG_FALLBACK end
+  return nil
+end
+
+local function refresh_debug_enabled()
+  local now = os.time() or 0
+  if now ~= 0 and (now - debug_checked_at) < debug_refresh_interval then
+    return debug_enabled
+  end
+  debug_checked_at = now
+
+  local f = io.open(DEBUG_FLAG_PRIMARY, "r")
+  if f then
+    f:close()
+    debug_enabled = true
+    return true
+  end
+  f = io.open(DEBUG_FLAG_FALLBACK, "r")
+  if f then
+    f:close()
+    debug_enabled = true
+    return true
+  end
+
+  debug_enabled = false
+  return false
+end
+
+local function debug_log(msg)
+  if not refresh_debug_enabled() then return end
+  local path = choose_debug_log_file_for_write()
+  if not path then return end
+  local f = io.open(path, "a")
+  if not f then return end
+  f:write(tostring(os.time() or 0), "\t", tostring(msg), "\n")
+  f:close()
 end
 
 local function create_empty_state_file(path)
@@ -199,22 +249,23 @@ local function clear_persisted(askey, hostn)
 end
 
 local function persist_if_changed(askey, hostn, hrec)
-  if not askey or not hostn or not hrec or not hrec.nstrategy then return end
+  if not askey or not hostn or not hrec or not hrec.nstrategy then return false end
   local n = tonumber(hrec.nstrategy)
-  if not n or n < 1 then return end
+  if not n or n < 1 then return false end
 
   -- Strategy "1" is default. Do not overwrite or delete stored state with it:
   -- keep the last known successful non-default strategy so restarts don't "forget" it.
   if n == 1 then
-    return
+    return false
   end
 
   local prev = state[askey] and state[askey][hostn] and state[askey][hostn].strategy or nil
-  if prev == n then return end
+  if prev == n then return false end
 
   if not state[askey] then state[askey] = {} end
   state[askey][hostn] = { strategy = n, ts = os.time() or 0 }
   write_state()
+  return true
 end
 
 local function conn_record_flags(desync)
@@ -229,6 +280,12 @@ local function has_positive_incoming_response(desync)
   if not desync or desync.outgoing then return false end
   local p = desync.l7payload
   return p == "tls_server_hello" or p == "http_reply"
+end
+
+local function should_debug_key(askey)
+  if not askey then return false end
+  local s = tostring(askey)
+  return s == "rkn_tcp" or s == "rkn_quic" or s == "custom_quic"
 end
 
 -- Wrap circular() from zapret-auto.lua.
@@ -269,8 +326,29 @@ if type(circular) == "function" then
       -- This is intentionally broader than only first success transition to avoid missing saves.
       local successful_state = nocheck_after and (not failure_after)
       local response_state = has_positive_incoming_response(desync) and (not failure_after)
+      local persisted = false
       if successful_state or response_state then
-        persist_if_changed(askey, hostn, hrec)
+        persisted = persist_if_changed(askey, hostn, hrec)
+      end
+
+      if should_debug_key(askey_before) or should_debug_key(askey_after) then
+        local track = desync and desync.track
+        local hn = track and track.hostname or ""
+        debug_log(
+          "key_before=" .. tostring(askey_before) ..
+          " key_after=" .. tostring(askey_after) ..
+          " host_before=" .. tostring(hostn_before) ..
+          " host_after=" .. tostring(hostn_after) ..
+          " track_host=" .. tostring(hn) ..
+          " l7=" .. tostring(desync and desync.l7payload) ..
+          " out=" .. tostring(desync and desync.outgoing and 1 or 0) ..
+          " nstrategy=" .. tostring(n_after) ..
+          " failure=" .. tostring(failure_after and 1 or 0) ..
+          " nocheck=" .. tostring(nocheck_after and 1 or 0) ..
+          " success_state=" .. tostring(successful_state and 1 or 0) ..
+          " response_state=" .. tostring(response_state and 1 or 0) ..
+          " persisted=" .. tostring(persisted and 1 or 0)
+        )
       end
     end)
     return verdict
