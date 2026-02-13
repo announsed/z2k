@@ -164,9 +164,10 @@ local function ensure_autostate_record(askey, hostkey)
   return autostate[askey][hostkey]
 end
 
-local function seed_from_state(desync)
-  load_state()
-
+local function get_record_for_desync(desync, do_seed)
+  if do_seed then
+    load_state()
+  end
   local hkf = get_hostkey_func(desync)
   if not hkf then return nil, nil, nil end
 
@@ -178,7 +179,7 @@ local function seed_from_state(desync)
   if not hostn then return nil, nil, nil end
 
   local hrec = ensure_autostate_record(askey, hostkey)
-  if not hrec.nstrategy then
+  if do_seed and not hrec.nstrategy then
     local rec = state[askey] and state[askey][hostn]
     if rec and rec.strategy then
       hrec.nstrategy = rec.strategy
@@ -234,15 +235,24 @@ end
 if type(circular) == "function" then
   local orig_circular = circular
   circular = function(ctx, desync)
-    local askey, hostn, hrec
-    local nocheck_before, failure_before = conn_record_flags(desync)
+    local askey_before, hostn_before, hrec_before
     pcall(function()
-      askey, hostn, hrec = seed_from_state(desync)
+      askey_before, hostn_before, hrec_before = get_record_for_desync(desync, true)
     end)
-    local n_before = hrec and tonumber(hrec.nstrategy) or nil
     local verdict = orig_circular(ctx, desync)
     pcall(function()
-      -- Persist only when success is detected (not after a failure-induced rotation).
+      local askey_after, hostn_after, hrec_after
+      pcall(function()
+        askey_after, hostn_after, hrec_after = get_record_for_desync(desync, false)
+      end)
+
+      -- Host key can change over connection lifetime (e.g. IP -> hostname when parser learns host).
+      -- Prefer post-call record to capture strategy chosen by original circular().
+      local askey = askey_after or askey_before
+      local hostn = hostn_after or hostn_before
+      local hrec = hrec_after or hrec_before
+      if not hrec then return end
+
       local nocheck_after, failure_after = conn_record_flags(desync)
       local n_after = hrec and tonumber(hrec.nstrategy) or nil
 
