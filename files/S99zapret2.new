@@ -511,15 +511,39 @@ z2k_detect_policy_mark()
     [ -x /bin/ndmc ] && ndmc_bin="/bin/ndmc"
     command -v "$ndmc_bin" >/dev/null 2>&1 || return 1
 
-    # Extract policy mark by description.
+    # Extract policy mark by description (handle quotes and "mark:" vs "mark =").
     local mark
-    mark="$("$ndmc_bin" -c show ip policy 2>/dev/null | awk -v name="$POLICY_NAME" '
-        BEGIN { IGNORECASE=1; found=0 }
-        $0 ~ ("description = " name ":") { found=1; next }
-        found && $0 ~ /mark:/ { print $NF; exit }
-        found && $0 ~ /description =/ { found=0 }
+    mark="$("$ndmc_bin" -c "show ip policy" 2>/dev/null | awk -v name="$POLICY_NAME" '
+        function trim(s) { sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s }
+        function unquote(s) {
+            s=trim(s)
+            if (s ~ /^\".*\"$/) { sub(/^\"/, "", s); sub(/\"$/, "", s) }
+            return s
+        }
+        function rm_trailing_colon(s) { sub(/:+$/, "", s); return s }
+        BEGIN { found=0; want=rm_trailing_colon(tolower(name)) }
+        {
+            line=tolower($0)
+            if (line ~ /description[ \t]*=/) {
+                desc=$0
+                sub(/.*description[ \t]*=[ \t]*/, "", desc)
+                desc=rm_trailing_colon(tolower(unquote(desc)))
+                found = (desc == want) ? 1 : 0
+                next
+            }
+            if (found && line ~ /mark[ \t]*[:=]/) {
+                m=$0
+                sub(/.*mark[ \t]*[:=][ \t]*/, "", m)
+                m=unquote(m)
+                split(m, a, /[ \t\r\n]+/)
+                print a[1]
+                exit
+            }
+        }
     ')"
 
+    mark="${mark%%/*}"
+    mark="${mark%%;*}"
     mark="${mark#0x}"
     mark="${mark#0X}"
     case "$mark" in
