@@ -285,13 +285,13 @@ end
 local function should_debug_key(askey)
   if not askey then return false end
   local s = tostring(askey)
-  return s == "rkn_tcp" or s == "rkn_quic" or s == "custom_quic"
+  return s == "rkn_tcp" or s == "rkn_quic" or s == "custom_quic" or s == "cf_quic"
 end
 
 local function is_quic_key(askey)
   if not askey then return false end
   local s = tostring(askey)
-  return s == "yt_quic" or s == "rkn_quic" or s == "custom_quic"
+  return s == "yt_quic" or s == "rkn_quic" or s == "custom_quic" or s == "cf_quic"
 end
 
 -- Wrap circular() from zapret-auto.lua.

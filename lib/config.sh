@@ -15,11 +15,12 @@ download_domain_lists() {
     local yt_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/YT"
     local rkn_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/RKN"
     local cf_tcp_dir="${ZAPRET2_DIR}/extra_strats/TCP/CF"
+    local cf_udp_dir="${ZAPRET2_DIR}/extra_strats/UDP/CF"
     local yt_udp_dir="${ZAPRET2_DIR}/extra_strats/UDP/YT"
     local rt_udp_dir="${ZAPRET2_DIR}/extra_strats/UDP/RUTRACKER"
     local snapshot_dir="${ZAPRET2_DIR}/files/lists"
 
-    mkdir -p "$yt_tcp_dir" "$rkn_tcp_dir" "$cf_tcp_dir" "$yt_udp_dir" "$rt_udp_dir" "$LISTS_DIR" || {
+    mkdir -p "$yt_tcp_dir" "$rkn_tcp_dir" "$cf_tcp_dir" "$cf_udp_dir" "$yt_udp_dir" "$rt_udp_dir" "$LISTS_DIR" || {
         print_error "Не удалось создать директории"
         return 1
     }
@@ -60,7 +61,18 @@ download_domain_lists() {
         print_error "Отсутствует snapshot: ${snapshot_dir}/extra_strats/TCP/CF/List.txt"
     fi
 
-    # 4. QUIC YouTube - скопировать из локального snapshot
+    # 4. QUIC Cloudflare - скопировать из локального snapshot
+    print_info "Загрузка QUIC Cloudflare list (local snapshot)..."
+    if [ -s "${snapshot_dir}/extra_strats/UDP/CF/List.txt" ]; then
+        cp -f "${snapshot_dir}/extra_strats/UDP/CF/List.txt" "${cf_udp_dir}/List.txt"
+        local count
+        count=$(wc -l < "${cf_udp_dir}/List.txt" 2>/dev/null || echo "0")
+        print_success "QUIC Cloudflare: $count доменов"
+    else
+        print_warning "Отсутствует snapshot: ${snapshot_dir}/extra_strats/UDP/CF/List.txt"
+    fi
+
+    # 5. QUIC YouTube - скопировать из локального snapshot
     print_info "Загрузка QUIC YouTube list (local snapshot)..."
     if [ -s "${snapshot_dir}/extra_strats/UDP/YT/List.txt" ]; then
         cp -f "${snapshot_dir}/extra_strats/UDP/YT/List.txt" "${yt_udp_dir}/List.txt"
@@ -71,7 +83,7 @@ download_domain_lists() {
         print_warning "Отсутствует snapshot: ${snapshot_dir}/extra_strats/UDP/YT/List.txt"
     fi
 
-    # 5. Discord - скопировать из локального snapshot
+    # 6. Discord - скопировать из локального snapshot
     print_info "Загрузка Discord list (local snapshot)..."
     if [ -s "${snapshot_dir}/russia-discord.txt" ]; then
         cp -f "${snapshot_dir}/russia-discord.txt" "${LISTS_DIR}/discord.txt"
@@ -82,7 +94,7 @@ download_domain_lists() {
         print_error "Отсутствует snapshot: ${snapshot_dir}/russia-discord.txt"
     fi
 
-    # 5.1. Discord TCP hostlist (for --hostlist-exclude in RKN profile)
+    # 6.1. Discord TCP hostlist (for --hostlist-exclude in RKN profile)
     print_info "Загрузка Discord TCP hostlist (local snapshot)..."
     local discord_tcp_dir="${ZAPRET2_DIR}/extra_strats"
     mkdir -p "$discord_tcp_dir"
@@ -101,7 +113,7 @@ download_domain_lists() {
         fi
     fi
 
-    # 6. Custom - создать пустой файл для пользовательских доменов
+    # 7. Custom - создать пустой файл для пользовательских доменов
     if [ ! -f "${LISTS_DIR}/custom.txt" ]; then
         touch "${LISTS_DIR}/custom.txt"
         print_info "Создан custom.txt для пользовательских доменов"
@@ -126,7 +138,7 @@ download_domain_lists() {
         grep -qxF "$domain" "$custom_list" 2>/dev/null || echo "$domain" >> "$custom_list"
     done
 
-    # 7. RuTracker QUIC - локальный список
+    # 8. RuTracker QUIC - локальный список
     cat > "${rt_udp_dir}/List.txt" <<'EOF'
 rutracker.org
 www.rutracker.org
@@ -212,6 +224,14 @@ show_domain_lists_stats() {
         local count
         count=$(wc -l < "$cf_list" 2>/dev/null || echo "0")
         printf "%-30s | %-10s\n" "Cloudflare TCP" "$count"
+    fi
+
+    # QUIC Cloudflare
+    local quic_cf_list="${ZAPRET2_DIR}/extra_strats/UDP/CF/List.txt"
+    if [ -f "$quic_cf_list" ]; then
+        local count
+        count=$(wc -l < "$quic_cf_list" 2>/dev/null || echo "0")
+        printf "%-30s | %-10s\n" "QUIC Cloudflare" "$count"
     fi
 
     # QUIC YouTube
@@ -324,6 +344,14 @@ show_active_processing() {
         local count
         count=$(wc -l < "$quic_yt_list" 2>/dev/null || echo "0")
         printf "%-30s | %-10s | %s\n" "QUIC YouTube (UDP 443)" "$count" "Активен"
+    fi
+
+    # QUIC Cloudflare
+    local quic_cf_list="${ZAPRET2_DIR}/extra_strats/UDP/CF/List.txt"
+    if [ -f "$quic_cf_list" ]; then
+        local count
+        count=$(wc -l < "$quic_cf_list" 2>/dev/null || echo "0")
+        printf "%-30s | %-10s | %s\n" "QUIC Cloudflare (UDP 443)" "$count" "Активен"
     fi
 
     # QUIC RuTracker
@@ -696,6 +724,12 @@ show_current_config() {
             local yt_quic_count
             yt_quic_count=$(wc -l < "$yt_quic_list" 2>/dev/null || echo "0")
             printf "  %-20s: %s доменов\n" "extra_strats/UDP/YT/List.txt" "$yt_quic_count"
+        fi
+        local cf_quic_list="${ZAPRET2_DIR}/extra_strats/UDP/CF/List.txt"
+        if [ -f "$cf_quic_list" ]; then
+            local cf_quic_count
+            cf_quic_count=$(wc -l < "$cf_quic_list" 2>/dev/null || echo "0")
+            printf "  %-20s: %s доменов\n" "extra_strats/UDP/CF/List.txt" "$cf_quic_count"
         fi
         local rt_quic_list="${ZAPRET2_DIR}/extra_strats/UDP/RUTRACKER/List.txt"
         if [ -f "$rt_quic_list" ]; then

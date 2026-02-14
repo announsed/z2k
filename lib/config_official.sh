@@ -20,6 +20,7 @@ generate_nfqws2_opt_from_strategies() {
     local cf_tcp=""
     local quic_udp=""
     local quic_custom_udp=""
+    local quic_cf_udp=""
     local discord_tcp=""
     local discord_udp=""
     local custom_tcp=""
@@ -49,6 +50,10 @@ generate_nfqws2_opt_from_strategies() {
     # (e.g. Instagram app which prefers QUIC/HTTP3).
     quic_custom_udp="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=2:time=60:udp_in=1:udp_out=4:key=custom_quic:nld=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=2:strategy=1 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=4:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:strategy=4 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:ip_autottl=-2,3-20:strategy=5 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=8:ip_autottl=-2,3-20:strategy=6 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=3:payload=all:strategy=7 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:strategy=8 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:ip_autottl=-1,3-20:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:ip_autottl=-2,3-20:strategy=10 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=11 --lua-desync=drop:strategy=11 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=16:strategy=12 --lua-desync=drop:strategy=12 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=24:strategy=13 --lua-desync=drop:strategy=13 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=14 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=14 --lua-desync=drop:strategy=14 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:ip_autottl=-2,3-20:strategy=15 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=15 --lua-desync=drop:strategy=15 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=3:payload=all:strategy=16 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=16 --lua-desync=drop:strategy=16 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:strategy=17 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=17 --lua-desync=drop:strategy=17 --lua-desync=fake:payload=quic_initial:dir=out:blob=0x00000000000000000000000000000000:repeats=2:payload=all:strategy=18 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=18 --lua-desync=drop:strategy=18 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:ip_autottl=-2,3-20:strategy=19 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=16:strategy=19 --lua-desync=drop:strategy=19 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:ip_autottl=-2,3-20:strategy=20 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=16:strategy=20 --lua-desync=drop:strategy=20"
 
+    # Cloudflare QUIC: dedicated autocircular profile based on
+    # youtubediscord/magisk-zapret2 strategies-udp.ini (safe subset).
+    quic_cf_udp="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=1:retrans=1:time=30:udp_in=1:udp_out=4:key=cf_quic:nld=2 --lua-desync=fake:blob=0x00000000000000000000000000000000:repeats=2:strategy=1 --lua-desync=fake:blob=0x00:strategy=2 --lua-desync=fake:blob=quic_google:repeats=2:strategy=3 --lua-desync=fake:blob=quic_google:repeats=4:strategy=4 --lua-desync=fake:blob=quic_google:repeats=6:strategy=5 --lua-desync=fake:blob=quic_google:repeats=8:strategy=6 --lua-desync=fake:blob=quic_google:repeats=9:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all:strategy=7 --lua-desync=fake:blob=quic_google:repeats=10:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:payload=all:strategy=8 --lua-desync=fake:blob=quic_google:repeats=10:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all:strategy=9 --lua-desync=fake:blob=quic_google:repeats=12:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all:strategy=10 --lua-desync=fake:blob=quic_google:repeats=14:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all:strategy=11 --lua-desync=fake:blob=fake_default_quic:repeats=11:payload=all:strategy=12 --lua-desync=fake:blob=quic_google:repeats=11:strategy=13 --lua-desync=fake:blob=quic_google:repeats=15:ip_ttl=0:ip6_ttl=0:badsum:payload=all:strategy=14 --lua-desync=fake:blob=quic5:repeats=3:payload=all:strategy=15 --lua-desync=send:ipfrag:ipfrag_pos_udp=8:strategy=15 --lua-desync=drop:strategy=15 --lua-desync=fake:blob=quic_google:repeats=6:payload=all:strategy=16 --lua-desync=fake:blob=quic_google:repeats=4:strategy=17 --lua-desync=fake:blob=quic_google:repeats=6:strategy=18 --lua-desync=fake:blob=quic_google:repeats=10:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:payload=all:strategy=19 --lua-desync=fake:blob=quic_google:repeats=2:strategy=20"
+
     # Discord TCP: z2r-style dedicated autocircular block (circular_locked:key=4).
     # Matches AloofLibra/z4r z2r config.default lines 201-231 exactly.
     # - No --filter-l7=tls (Discord uses discord_ip_discovery, not just TLS).
@@ -74,6 +79,7 @@ EOF
     [ -z "$youtube_gv_tcp" ] && youtube_gv_tcp="$default_strategy"
     [ -z "$rkn_tcp" ] && rkn_tcp="$default_strategy"
     [ -z "$cf_tcp" ] && cf_tcp="$rkn_tcp"
+    [ -z "$quic_cf_udp" ] && quic_cf_udp="$quic_custom_udp"
     [ -z "$quic_custom_udp" ] && quic_custom_udp="--filter-udp=443 --filter-l7=quic --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
     custom_tcp="$default_strategy"
 
@@ -145,6 +151,9 @@ EOF
 
     # QUIC YT
     add_hostlist_line "${extra_strats_dir}/UDP/YT/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/UDP/YT/List.txt $quic_udp --new"
+
+    # QUIC Cloudflare (UDP 443)
+    add_hostlist_line "${extra_strats_dir}/UDP/CF/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/UDP/CF/List.txt $quic_cf_udp --new"
 
     # QUIC Custom (UDP 443)
     add_hostlist_line "${lists_dir}/custom.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${lists_dir}/custom.txt $quic_custom_udp --new"
@@ -314,7 +323,7 @@ NFQWS2_UDP_PKT_IN="3"
 # ==============================================================================
 # This section is auto-generated from z2k strategy database
 # Each --new separator creates independent profile with own filters and strategy
-# Order: RKN TCP → YouTube TCP → YouTube GV → QUIC YT → QUIC Custom → Discord TCP → Discord UDP → Custom
+# Order: CF TCP → RKN TCP → YouTube TCP → YouTube GV → QUIC YT → QUIC Cloudflare → QUIC Custom → Discord TCP → Discord UDP → Custom
 # Profiles use explicit hostlists from z2k list files without placeholder expansion.
 # This avoids mixing with global hostlists from MODE_FILTER.
 CONFIG

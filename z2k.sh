@@ -260,6 +260,7 @@ extra_strats/TCP/YT/List.txt
 extra_strats/TCP/RKN/List.txt
 extra_strats/TCP/RKN/Discord.txt
 extra_strats/TCP/CF/List.txt
+extra_strats/UDP/CF/List.txt
 extra_strats/UDP/YT/List.txt
 russia-discord.txt
 "
