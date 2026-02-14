@@ -446,9 +446,7 @@ load_modules()
 
 # Keenetic fix (similar to nfqws2-keenetic): ensure UDP packets processed by nfqws2
 # (marked with DESYNC_MARK) still get source NAT on WAN via a dedicated nat chain.
-#
-# Toggle: set UDP_MASQUERADE_FIX=0 in config to disable.
-Z2K_IPT_NAT_CHAIN="${Z2K_IPT_NAT_CHAIN:-zapret2_nat}"
+Z2K_IPT_NAT_CHAIN="zapret2_nat"
 
 iptablesw()
 {
@@ -458,7 +456,6 @@ iptablesw()
 
 z2k_udp_masquerade_fix_start()
 {
-    [ "${UDP_MASQUERADE_FIX:-1}" = "1" ] || return 0
     [ "$FWTYPE" = "iptables" ] || return 0
     exists iptables || return 0
 
@@ -483,7 +480,6 @@ z2k_udp_masquerade_fix_start()
 
 z2k_udp_masquerade_fix_stop()
 {
-    [ "${UDP_MASQUERADE_FIX:-1}" = "1" ] || return 0
     [ "$FWTYPE" = "iptables" ] || return 0
     exists iptables || return 0
 
