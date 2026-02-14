@@ -419,7 +419,8 @@ load_modules()
     echo "Loading required kernel modules"
 
     # ������ ����������� ������� ��� ������ zapret2
-    local modules="xt_multiport xt_connbytes xt_NFQUEUE nfnetlink_queue"
+    # Add connmark modules for Keenetic policy integration (nfqws2-keenetic style).
+    local modules="xt_multiport xt_connbytes xt_NFQUEUE nfnetlink_queue xt_CONNMARK xt_connmark"
 
     for module in $modules; do
         if ! lsmod | grep -q "^$module"; then
@@ -448,10 +449,262 @@ load_modules()
 # (marked with DESYNC_MARK) still get source NAT on WAN via a dedicated nat chain.
 Z2K_IPT_NAT_CHAIN="zapret2_nat"
 
+# Connmark-based exclusion (borrowed from nfqws2-keenetic):
+# - Mark connections outside selected Keenetic policy (POLICY_NAME/POLICY_EXCLUDE) with CONNMARK exclude bit.
+# - NFQUEUE rules include "-m connmark ! --mark $Z2K_CONNMARK_EXCLUDE" so excluded flows never enter NFQUEUE.
+Z2K_CONNMARK_EXCLUDE="0x20000000/0x20000000"
+Z2K_CONNMARK_OK4=0
+Z2K_CONNMARK_OK6=0
+Z2K_POLICY_MARK=""
+
 iptablesw()
 {
     # Prefer -w (xtables lock wait). Fallback without -w for older iptables.
     iptables -w "$@" 2>/dev/null || iptables "$@" 2>/dev/null
+}
+
+ip6tablesw()
+{
+    ip6tables -w "$@" 2>/dev/null || ip6tables "$@" 2>/dev/null
+}
+
+z2k_connmark_check_avail4()
+{
+    grep -qw connmark /proc/net/ip_tables_matches 2>/dev/null || return 1
+    grep -qw CONNMARK /proc/net/ip_tables_targets 2>/dev/null || return 1
+    return 0
+}
+
+z2k_connmark_check_avail6()
+{
+    grep -qw connmark /proc/net/ip6_tables_matches 2>/dev/null || return 1
+    grep -qw CONNMARK /proc/net/ip6_tables_targets 2>/dev/null || return 1
+    return 0
+}
+
+z2k_connmark_init()
+{
+    Z2K_CONNMARK_OK4=0
+    Z2K_CONNMARK_OK6=0
+
+    [ "$FWTYPE" = "iptables" ] || return 0
+
+    # Try to load connmark modules (may be built-in).
+    modprobe xt_CONNMARK 2>/dev/null || true
+    modprobe xt_connmark 2>/dev/null || true
+
+    exists iptables && z2k_connmark_check_avail4 && Z2K_CONNMARK_OK4=1
+    [ "$DISABLE_IPV6" = "1" ] && return 0
+    exists ip6tables && z2k_connmark_check_avail6 && Z2K_CONNMARK_OK6=1
+}
+
+z2k_detect_policy_mark()
+{
+    Z2K_POLICY_MARK=""
+
+    # Default to nfqws2-keenetic convention. If policy doesn't exist, we process all traffic.
+    POLICY_NAME="${POLICY_NAME:-nfqws}"
+    POLICY_EXCLUDE="${POLICY_EXCLUDE:-0}"
+
+    # ndmc exists on Keenetic firmware (outside Entware). Use /bin/ndmc when present.
+    local ndmc_bin="ndmc"
+    [ -x /bin/ndmc ] && ndmc_bin="/bin/ndmc"
+    command -v "$ndmc_bin" >/dev/null 2>&1 || return 1
+
+    # Extract policy mark by description.
+    local mark
+    mark="$("$ndmc_bin" -c show ip policy 2>/dev/null | awk -v name="$POLICY_NAME" '
+        BEGIN { IGNORECASE=1; found=0 }
+        $0 ~ ("description = " name ":") { found=1; next }
+        found && $0 ~ /mark:/ { print $NF; exit }
+        found && $0 ~ /description =/ { found=0 }
+    ')"
+
+    mark="${mark#0x}"
+    mark="${mark#0X}"
+    case "$mark" in
+        ""|*[!0-9a-fA-F]*)
+            return 1
+            ;;
+    esac
+
+    Z2K_POLICY_MARK="0x${mark}/0x0fffffff"
+    return 0
+}
+
+z2k_policy_connmark_start()
+{
+    [ "$FWTYPE" = "iptables" ] || return 0
+    [ "$Z2K_CONNMARK_OK4" = "1" ] || return 0
+
+    z2k_detect_policy_mark || return 0
+
+    local pol_rule=""
+    if [ "$POLICY_EXCLUDE" = "1" ]; then
+        echo "Found policy '$POLICY_NAME'. Traffic from it will be excluded from processing."
+        pol_rule="-m mark --mark $Z2K_POLICY_MARK -j CONNMARK --set-xmark $Z2K_CONNMARK_EXCLUDE"
+    else
+        echo "Found policy '$POLICY_NAME'. Only traffic from it will be processed."
+        pol_rule="-m mark ! --mark $Z2K_POLICY_MARK -j CONNMARK --set-xmark $Z2K_CONNMARK_EXCLUDE"
+    fi
+
+    local wan iface
+    wan="$(get_wan_ifaces4)"
+    [ -n "$wan" ] || return 0
+
+    for iface in $wan; do
+        # Exclude connections outside policy by setting CONNMARK bit before NFQUEUE rules.
+        iptablesw -t mangle -C POSTROUTING -o "$iface" $pol_rule || iptablesw -t mangle -I POSTROUTING -o "$iface" $pol_rule
+    done
+
+    [ "$Z2K_CONNMARK_OK6" = "1" ] || return 0
+
+    wan="$(get_wan_ifaces6)"
+    [ -n "$wan" ] || return 0
+
+    for iface in $wan; do
+        ip6tablesw -t mangle -C POSTROUTING -o "$iface" $pol_rule || ip6tablesw -t mangle -I POSTROUTING -o "$iface" $pol_rule
+    done
+}
+
+z2k_policy_connmark_stop()
+{
+    [ "$FWTYPE" = "iptables" ] || return 0
+    [ "$Z2K_CONNMARK_OK4" = "1" ] || return 0
+
+    z2k_detect_policy_mark || return 0
+
+    local pol_rule=""
+    if [ "$POLICY_EXCLUDE" = "1" ]; then
+        pol_rule="-m mark --mark $Z2K_POLICY_MARK -j CONNMARK --set-xmark $Z2K_CONNMARK_EXCLUDE"
+    else
+        pol_rule="-m mark ! --mark $Z2K_POLICY_MARK -j CONNMARK --set-xmark $Z2K_CONNMARK_EXCLUDE"
+    fi
+
+    local wan iface
+    wan="$(get_wan_ifaces4)"
+    [ -n "$wan" ] || return 0
+
+    for iface in $wan; do
+        while iptablesw -t mangle -C POSTROUTING -o "$iface" $pol_rule 2>/dev/null; do
+            iptablesw -t mangle -D POSTROUTING -o "$iface" $pol_rule || break
+        done
+    done
+
+    [ "$Z2K_CONNMARK_OK6" = "1" ] || return 0
+
+    wan="$(get_wan_ifaces6)"
+    [ -n "$wan" ] || return 0
+
+    for iface in $wan; do
+        while ip6tablesw -t mangle -C POSTROUTING -o "$iface" $pol_rule 2>/dev/null; do
+            ip6tablesw -t mangle -D POSTROUTING -o "$iface" $pol_rule || break
+        done
+    done
+}
+
+# Override zapret2 iptables NFQUEUE rule builders to respect connmark exclusion.
+# This keeps rule semantics identical to upstream, adding only "-m connmark ! --mark $Z2K_CONNMARK_EXCLUDE".
+_fw_nfqws_post4()
+{
+    # $1 - 1 - add, 0 - del
+    # $2 - iptable filter for ipv4
+    # $3 - queue number
+    # $4 - wan interface names space separated
+    [ "$DISABLE_IPV4" = "1" -o -z "$2" ] || {
+        local i rule connchk=""
+
+        ipt_print_op $1 "$2" "nfqws postrouting (qnum $3)"
+
+        [ "$Z2K_CONNMARK_OK4" = "1" ] && connchk="-m connmark ! --mark $Z2K_CONNMARK_EXCLUDE"
+
+        rule="$(ipt_mark_filter) $connchk -m mark ! --mark $DESYNC_MARK/$DESYNC_MARK $2 $IPSET_EXCLUDE dst -j NFQUEUE --queue-num $3 --queue-bypass"
+        if [ -n "$4" ] ; then
+            for i in $4; do
+                ipt_add_del $1 POSTROUTING -t mangle -o $i $rule
+            done
+        else
+            ipt_add_del $1 POSTROUTING -t mangle $rule
+        fi
+    }
+}
+
+_fw_nfqws_post6()
+{
+    # $1 - 1 - add, 0 - del
+    # $2 - iptable filter for ipv6
+    # $3 - queue number
+    # $4 - wan interface names space separated
+    [ "$DISABLE_IPV6" = "1" -o -z "$2" ] || {
+        local i rule connchk=""
+
+        ipt_print_op $1 "$2" "nfqws postrouting (qnum $3)" 6
+
+        [ "$Z2K_CONNMARK_OK6" = "1" ] && connchk="-m connmark ! --mark $Z2K_CONNMARK_EXCLUDE"
+
+        rule="$(ipt_mark_filter) $connchk -m mark ! --mark $DESYNC_MARK/$DESYNC_MARK $2 $IPSET_EXCLUDE6 dst -j NFQUEUE --queue-num $3 --queue-bypass"
+        if [ -n "$4" ] ; then
+            for i in $4; do
+                ipt6_add_del $1 POSTROUTING -t mangle -o $i $rule
+            done
+        else
+            ipt6_add_del $1 POSTROUTING -t mangle $rule
+        fi
+    }
+}
+
+_fw_nfqws_pre4()
+{
+    # $1 - 1 - add, 0 - del
+    # $2 - iptable filter for ipv4
+    # $3 - queue number
+    # $4 - wan interface names space separated
+    [ "$DISABLE_IPV4" = "1" -o -z "$2" ] || {
+        local i rule connchk=""
+
+        ipt_print_op $1 "$2" "nfqws input+forward (qnum $3)"
+
+        [ "$Z2K_CONNMARK_OK4" = "1" ] && connchk="-m connmark ! --mark $Z2K_CONNMARK_EXCLUDE"
+
+        rule="$connchk $2 $IPSET_EXCLUDE src -j NFQUEUE --queue-num $3 --queue-bypass"
+        if [ -n "$4" ] ; then
+            for i in $4; do
+                # iptables PREROUTING chain is before NAT. not possible to have DNATed ip's there
+                ipt_add_del $1 INPUT -t mangle -i $i $rule
+                ipt_add_del $1 FORWARD -t mangle -i $i $rule
+            done
+        else
+            ipt_add_del $1 INPUT -t mangle $rule
+            ipt_add_del $1 FORWARD -t mangle $rule
+        fi
+    }
+}
+
+_fw_nfqws_pre6()
+{
+    # $1 - 1 - add, 0 - del
+    # $2 - iptable filter for ipv6
+    # $3 - queue number
+    # $4 - wan interface names space separated
+    [ "$DISABLE_IPV6" = "1" -o -z "$2" ] || {
+        local i rule connchk=""
+
+        ipt_print_op $1 "$2" "nfqws input+forward (qnum $3)" 6
+
+        [ "$Z2K_CONNMARK_OK6" = "1" ] && connchk="-m connmark ! --mark $Z2K_CONNMARK_EXCLUDE"
+
+        rule="$connchk $2 $IPSET_EXCLUDE6 src -j NFQUEUE --queue-num $3 --queue-bypass"
+        if [ -n "$4" ] ; then
+            for i in $4; do
+                # iptables PREROUTING chain is before NAT. not possible to have DNATed ip's there
+                ipt6_add_del $1 INPUT -t mangle -i $i $rule
+                ipt6_add_del $1 FORWARD -t mangle -i $i $rule
+            done
+        else
+            ipt6_add_del $1 INPUT -t mangle $rule
+            ipt6_add_del $1 FORWARD -t mangle $rule
+        fi
+    }
 }
 
 z2k_udp_masquerade_fix_start()
@@ -506,7 +759,9 @@ start_fw()
     echo "Detected firewall type: $FWTYPE"
 
     # ������������ ����������� ������� �� common/linux_fw.sh
+    z2k_connmark_init
     zapret_apply_firewall
+    z2k_policy_connmark_start
     z2k_udp_masquerade_fix_start
 
     return 0
@@ -520,7 +775,9 @@ stop_fw()
     linux_fwtype
 
     # ������������ ����������� �������
+    z2k_connmark_init
     z2k_udp_masquerade_fix_stop
+    z2k_policy_connmark_stop
     zapret_unapply_firewall
 
     return 0
