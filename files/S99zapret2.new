@@ -73,7 +73,7 @@ existf zapret_do_firewall_nft || . "$ZAPRET_BASE/common/nft.sh" 2>/dev/null
 # ��������: ������������� ����� � ������ iptables (�������� - �� :)
 # std_ports() ���� ������� ��� �������� ipt.sh, �� ����� ���������� ���� ������
 # �������� ������� std_ports() ����� �������� config
-std_ports
+command -v std_ports >/dev/null 2>&1 && std_ports
 [ -n "$Z2K_DEBUG" ] && echo "DEBUG: std_ports() ������� - NFQWS2_PORTS_TCP_IPT='$NFQWS2_PORTS_TCP_IPT'"
 
 # ------------------------------------------------------------------------------
