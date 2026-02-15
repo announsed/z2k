@@ -149,6 +149,63 @@ EOF
     quic_custom_udp=$(ensure_circular_failure_detector "$quic_custom_udp")
     quic_cf_udp=$(ensure_circular_failure_detector "$quic_cf_udp")
 
+    # Ensure circular sees TCP RST/FIN packets without payload (payload_type=empty),
+    # otherwise early connection aborts can be invisible to failure detectors.
+    # Only the --payload= token that is active for --lua-desync=circular:* is modified.
+    ensure_circular_payload_empty() {
+        local input="$1"
+        local out=""
+        local token=""
+        local pending_payload=""
+        local buf=""
+
+        for token in $input; do
+            case "$token" in
+                --payload=*)
+                    if [ -n "$pending_payload" ]; then
+                        out="${out:+$out }$pending_payload"
+                        [ -n "$buf" ] && out="${out:+$out }$buf"
+                    fi
+                    pending_payload="$token"
+                    buf=""
+                    ;;
+                --lua-desync=circular:*)
+                    if [ -n "$pending_payload" ]; then
+                        case "$pending_payload" in
+                            --payload=all) ;;
+                            *empty*) ;;
+                            *) pending_payload="${pending_payload},empty" ;;
+                        esac
+                        out="${out:+$out }$pending_payload"
+                        [ -n "$buf" ] && out="${out:+$out }$buf"
+                        pending_payload=""
+                        buf=""
+                    fi
+                    out="${out:+$out }$token"
+                    ;;
+                *)
+                    if [ -n "$pending_payload" ]; then
+                        buf="${buf:+$buf }$token"
+                    else
+                        out="${out:+$out }$token"
+                    fi
+                    ;;
+            esac
+        done
+
+        if [ -n "$pending_payload" ]; then
+            out="${out:+$out }$pending_payload"
+            [ -n "$buf" ] && out="${out:+$out }$buf"
+        fi
+
+        printf '%s' "$out"
+    }
+
+    youtube_tcp_tcp=$(ensure_circular_payload_empty "$youtube_tcp_tcp")
+    youtube_gv_tcp=$(ensure_circular_payload_empty "$youtube_gv_tcp")
+    rkn_tcp=$(ensure_circular_payload_empty "$rkn_tcp")
+    cf_tcp=$(ensure_circular_payload_empty "$cf_tcp")
+
     # Генерировать NFQWS2_OPT в формате официального config
     # ������������ NFQWS2_OPT � ������� ������������ config
     local nfqws2_opt_lines=""
