@@ -293,6 +293,39 @@ local function is_quic_key(askey)
   return s == "yt_quic" or s == "rkn_quic" or s == "custom_quic" or s == "cf_quic"
 end
 
+-- Some strategy packs gate tcp_ts-based variants using `stopif:iff=cond_tcp_has_ts`.
+-- Provide this iff helper even if upstream zapret-auto.lua version is older.
+if type(cond_tcp_has_ts) ~= "function" then
+  function cond_tcp_has_ts(desync)
+    local dis = desync and desync.dis
+    local tcp = dis and dis.tcp
+    local opts = tcp and tcp.options
+    if not tcp or not opts then return false end
+
+    -- Prefer upstream helper if available.
+    if type(find_tcp_option) == "function" then
+      local ts_kind = TCP_KIND_TS or 8
+      local ok = find_tcp_option(opts, ts_kind)
+      return ok and true or false
+    end
+
+    if type(opts) ~= "table" then
+      return false
+    end
+
+    -- Fallback: try to detect TCP TS option kind=8 in dissected options.
+    for _, opt in pairs(opts) do
+      if type(opt) == "table" then
+        local kind = tonumber(opt.kind or opt.type or opt[1])
+        if kind == 8 then return true end
+      else
+        if tonumber(opt) == 8 then return true end
+      end
+    end
+    return false
+  end
+end
+
 -- Wrap circular() from zapret-auto.lua.
 if type(circular) == "function" then
   local orig_circular = circular
