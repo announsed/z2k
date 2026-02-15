@@ -107,7 +107,7 @@ EOF
                         esac
                     done
                     IFS="$old_ifs"
-                    token="--lua-desync=circular:fails=3:retrans=3:time=60:key=cf_tcp:nld=2"
+                    token="--lua-desync=circular:fails=3:retrans=3:time=60:key=cf_tcp:nld=2:failure_detector=z2k_tls_alert_fatal"
                     [ -n "$rest" ] && token="$token:$rest"
                     ;;
             esac

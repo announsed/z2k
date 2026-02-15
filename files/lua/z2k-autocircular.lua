@@ -326,6 +326,25 @@ if type(cond_tcp_has_ts) ~= "function" then
   end
 end
 
+-- Failure detector: treat any inbound fatal TLS alert record as a failure.
+-- This helps autocircular rotate on early handshake aborts (e.g. Cloudflare ECH),
+-- which are not counted by the standard retransmission-based detector.
+function z2k_tls_alert_fatal(desync, crec)
+  if type(standard_failure_detector) == "function" then
+    local ok, res = pcall(standard_failure_detector, desync, crec)
+    if ok and res then return true end
+  end
+
+  if not desync or desync.outgoing then return false end
+  local dis = desync.dis
+  local payload = dis and dis.payload
+  if type(payload) ~= "string" then return false end
+  if #payload < 7 then return false end
+  if payload:byte(1) ~= 0x15 then return false end -- TLS record: alert (21)
+  if payload:byte(6) ~= 0x02 then return false end -- alert level: fatal (2)
+  return true
+end
+
 -- Wrap circular() from zapret-auto.lua.
 if type(circular) == "function" then
   local orig_circular = circular
