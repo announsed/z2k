@@ -283,9 +283,8 @@ local function has_positive_incoming_response(desync)
 end
 
 local function should_debug_key(askey)
-  if not askey then return false end
-  local s = tostring(askey)
-  return s == "rkn_tcp" or s == "rkn_quic" or s == "custom_quic" or s == "cf_quic"
+  -- User requested monitoring for all keys (not only selected ones).
+  return not is_blank(askey)
 end
 
 local function is_quic_key(askey)
