@@ -119,6 +119,49 @@ EOF
     }
     cf_tcp=$(normalize_cf_circular "$cf_tcp")
 
+    # Force domain-level memory for all autocircular profiles.
+    # This prevents churn on frequently changing subdomains.
+    ensure_circular_nld2() {
+        local input="$1"
+        local out=""
+        local token=""
+        local opts=""
+        local part=""
+        local rest=""
+        local old_ifs="$IFS"
+
+        for token in $input; do
+            case "$token" in
+                --lua-desync=circular:*)
+                    opts="${token#--lua-desync=circular:}"
+                    rest=""
+                    IFS=':'
+                    for part in $opts; do
+                        case "$part" in
+                            nld=*) ;;
+                            *) rest="${rest:+$rest:}$part" ;;
+                        esac
+                    done
+                    IFS="$old_ifs"
+                    if [ -n "$rest" ]; then
+                        token="--lua-desync=circular:${rest}:nld=2"
+                    else
+                        token="--lua-desync=circular:nld=2"
+                    fi
+                    ;;
+            esac
+            out="${out:+$out }$token"
+        done
+
+        IFS="$old_ifs"
+        printf '%s' "$out"
+    }
+
+    youtube_tcp_tcp=$(ensure_circular_nld2 "$youtube_tcp_tcp")
+    youtube_gv_tcp=$(ensure_circular_nld2 "$youtube_gv_tcp")
+    rkn_tcp=$(ensure_circular_nld2 "$rkn_tcp")
+    quic_udp=$(ensure_circular_nld2 "$quic_udp")
+
     # Ensure all circular profiles use our enhanced failure detector.
     # It keeps standard behavior but additionally treats inbound fatal TLS alerts as failures.
     ensure_circular_failure_detector() {
