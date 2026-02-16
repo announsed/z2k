@@ -221,13 +221,9 @@ EOF
         fi
     }
 
-    # Cloudflare TCP (isolated from RKN, with dedicated aggressive circular key=cf_tcp)
-    add_hostlist_line "${extra_strats_dir}/TCP/CF/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/TCP/CF/List.txt $cf_tcp --new"
-
-    # RKN TCP (with Discord/Cloudflare hostlist-exclude to avoid overlap with dedicated profiles)
+    # RKN TCP (with Discord hostlist-exclude)
     local rkn_exclude="--hostlist-exclude=${lists_dir}/whitelist.txt"
     [ -s "${extra_strats_dir}/TCP_Discord.txt" ] && rkn_exclude="$rkn_exclude --hostlist-exclude=${extra_strats_dir}/TCP_Discord.txt"
-    [ -s "${extra_strats_dir}/TCP/CF/List.txt" ] && rkn_exclude="$rkn_exclude --hostlist-exclude=${extra_strats_dir}/TCP/CF/List.txt"
     add_hostlist_line "${extra_strats_dir}/TCP/RKN/List.txt" "$rkn_exclude --hostlist=${extra_strats_dir}/TCP/RKN/List.txt $rkn_tcp --new"
 
     # YouTube TCP
@@ -239,20 +235,11 @@ EOF
     # QUIC YT
     add_hostlist_line "${extra_strats_dir}/UDP/YT/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/UDP/YT/List.txt $quic_udp --new"
 
-    # QUIC Cloudflare (UDP 443)
-    add_hostlist_line "${extra_strats_dir}/UDP/CF/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/UDP/CF/List.txt $quic_cf_udp --new"
-
-    # QUIC Custom (UDP 443)
-    add_hostlist_line "${lists_dir}/custom.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${lists_dir}/custom.txt $quic_custom_udp --new"
-
     # Discord TCP: self-contained z2r block (hostlist, strategies, --new all included)
     add_hostlist_line "${extra_strats_dir}/TCP_Discord.txt" "$discord_tcp_block"
 
     # Discord UDP (no hostlist - STUN has no hostname, uses filter-l7=discord,stun + allow_nohost)
     nfqws2_opt_lines="$nfqws2_opt_lines$discord_udp --new\\n"
-
-    # Custom TCP
-    add_hostlist_line "${lists_dir}/custom.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${lists_dir}/custom.txt $custom_tcp"
 
     local nfqws2_opt_value
     nfqws2_opt_value=$(printf "%b" "$nfqws2_opt_lines" | sed '/^$/d')
