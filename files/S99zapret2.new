@@ -745,15 +745,23 @@ z2k_split_dns_start()
 
 z2k_split_dns_domains()
 {
-    local domains="$Z2K_SPLIT_DNS_DOMAINS"
     local list
 
-    for list in "$EXTRA_STRATS_DIR/TCP/YT/List.txt" "$EXTRA_STRATS_DIR/UDP/YT/List.txt"; do
-        [ -f "$list" ] || continue
-        domains="$domains $(awk '{sub(/#.*/,\"\",$0); gsub(/\\r/,\"\",$0); gsub(/^[ \t]+|[ \t]+$/, \"\", $0); if($0!=\"\") print tolower($0)}' "$list")"
-    done
+    {
+        for domain in $Z2K_SPLIT_DNS_DOMAINS; do
+            echo "$domain"
+        done
 
-    echo "$domains" | tr ' \t' '\n\n' | sed '/^$/d' | sort -u
+        for list in "$EXTRA_STRATS_DIR/TCP/YT/List.txt" "$EXTRA_STRATS_DIR/UDP/YT/List.txt"; do
+            [ -f "$list" ] || continue
+            awk '{
+                sub(/#.*/, "", $0)
+                gsub(/\r/, "", $0)
+                gsub(/^[ \t]+|[ \t]+$/, "", $0)
+                if ($0 != "") print tolower($0)
+            }' "$list"
+        done
+    } | sed '/^$/d' | sort -u
 }
 
 z2k_split_dns_stop()
