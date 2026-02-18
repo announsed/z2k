@@ -261,10 +261,6 @@ EOF
                 print_info "Исправьте проблему и запустите снова"
                 return 1
                 ;;
-        3)
-            print_info "Применение новых дефолтных стратегий..."
-            apply_new_default_strategies --auto
-            ;;
             *)
                 print_warning "Продолжаем без обновления пакетов..."
                 print_info "Будет использована текущая локальная база пакетов"
@@ -313,10 +309,6 @@ step_check_dns() {
                 print_info "Установка может не удаться при загрузке файлов"
                 return 0
                 ;;
-        3)
-            print_info "Применение новых дефолтных стратегий..."
-            apply_new_default_strategies --auto
-            ;;
             *)
                 print_info "Установка прервана"
                 print_info "Исправьте DNS и запустите снова"
@@ -433,10 +425,6 @@ unzip
             read -r answer </dev/tty
             case "$answer" in
                 [Yy]*) print_warning "Продолжаем на свой страх и риск..." ;;
-        3)
-            print_info "Применение новых дефолтных стратегий..."
-            apply_new_default_strategies --auto
-            ;;
                 *) return 1 ;;
             esac
         fi
@@ -469,10 +457,6 @@ unzip
                         print_warning "Не удалось установить GNU gzip"
                     fi
                     ;;
-        3)
-            print_info "Применение новых дефолтных стратегий..."
-            apply_new_default_strategies --auto
-            ;;
                 *)
                     print_info "Пропускаем установку GNU gzip"
                     ;;
@@ -494,10 +478,6 @@ unzip
                         print_warning "Не удалось установить GNU sort"
                     fi
                     ;;
-        3)
-            print_info "Применение новых дефолтных стратегий..."
-            apply_new_default_strategies --auto
-            ;;
                 *)
                     print_info "Пропускаем установку GNU sort"
                     ;;
@@ -663,10 +643,6 @@ step_build_zapret2() {
             *lexra*) bin_arch="linux-lexra" ;;
             *ppc*) bin_arch="linux-ppc" ;;
             *riscv64*) bin_arch="linux-riscv64" ;;
-        3)
-            print_info "Применение новых дефолтных стратегий..."
-            apply_new_default_strategies --auto
-            ;;
             *)
                 print_error "Unsupported architecture: $arch (uname=$sys_arch${entware_arch:+, opkg=$entware_arch})"
                 return 1
@@ -744,7 +720,7 @@ step_build_zapret2() {
 
     # Обновить fake blobs если есть более свежие в z2k
     if [ -d "${WORK_DIR}/files/fake" ]; then
-        print_info "���������� fake blobs �� z2k..."
+        print_info "Updating fake blobs from z2k..."
         cp -f "${WORK_DIR}/files/fake/"* "${ZAPRET2_DIR}/files/fake/" 2>/dev/null || true
     fi
 
@@ -754,23 +730,23 @@ step_build_zapret2() {
         mkdir -p "${ZAPRET2_DIR}/files/lists"
         cp -Rf "${WORK_DIR}/files/lists/"* "${ZAPRET2_DIR}/files/lists/" 2>/dev/null || true
     fi
-    # ����������� lua.gz (���� ����� openwrt-embedded)
+    # Decompress lua.gz files (if any are shipped by embedded builds)
     if [ -d "${ZAPRET2_DIR}/lua" ]; then
         if command -v gzip >/dev/null 2>&1; then
             for f in "${ZAPRET2_DIR}/lua/"*.lua.gz; do
                 [ -f "$f" ] || continue
                 local out="${f%.gz}"
-                print_info "���������� $(basename "$f")..."
+                print_info "Decompressing $(basename "$f")..."
                 if gzip -dc "$f" > "${out}.tmp" 2>/dev/null; then
                     mv -f "${out}.tmp" "$out"
                     rm -f "$f"
                 else
                     rm -f "${out}.tmp"
-                    print_warning "�� ������� ����������� $f"
+                    print_warning "Failed to decompress $f"
                 fi
             done
         else
-            print_warning "gzip �� ������, ���������� lua.gz ���������"
+            print_warning "gzip not found, skipping lua.gz decompression"
         fi
     fi
     # ===========================================================================
@@ -1003,10 +979,6 @@ step_check_and_select_fwtype() {
         nftables)
             print_info "nftables - современный firewall Linux (kernel 3.13+)"
             print_info "Более эффективен чем iptables"
-            ;;
-        3)
-            print_info "Применение новых дефолтных стратегий..."
-            apply_new_default_strategies --auto
             ;;
         *)
             print_warning "Неизвестный тип firewall: $FWTYPE"
