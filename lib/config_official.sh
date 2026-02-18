@@ -424,7 +424,7 @@ NFQWS2_ENABLE=1
 NFQWS2_PORTS_TCP="80,443,2053,2083,2087,2096,8443"
 
 # UDP ports to process (will be filtered by --filter-udp in NFQWS2_OPT)
-NFQWS2_PORTS_UDP="443,50000:50099,1400,3478:3481,5349,19294:19344"
+NFQWS2_PORTS_UDP="443,50000-50099,1400,3478-3481,5349,19294-19344"
 
 # Packet direction filters (connbytes)
 # NOTE: These are packet counts, NOT ranges
