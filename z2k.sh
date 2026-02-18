@@ -88,6 +88,37 @@ confirm() {
 # ПРОВЕРКИ ОКРУЖЕНИЯ
 # ==============================================================================
 
+z2k_detect_entware_arch() {
+    local opkg_bin="opkg"
+    [ -x /opt/bin/opkg ] && opkg_bin="/opt/bin/opkg"
+    command -v "$opkg_bin" >/dev/null 2>&1 || return 1
+
+    "$opkg_bin" print-architecture 2>/dev/null | awk '
+        $1 == "arch" && $2 != "all" {
+            prio = ($3 ~ /^[0-9]+$/) ? $3 + 0 : 0
+            if (prio >= max) { max = prio; arch = $2 }
+        }
+        END { if (arch != "") print arch }
+    '
+}
+
+z2k_map_arch_to_bin_arch() {
+    case "$1" in
+        aarch64|arm64|*aarch64*|*arm64*) echo "linux-arm64" ;;
+        armv7l|armv6l|arm|*armv7*|*armv6*|arm*) echo "linux-arm" ;;
+        x86_64|amd64|*x86_64*|*amd64*) echo "linux-x86_64" ;;
+        i386|i486|i586|i686|x86) echo "linux-x86" ;;
+        *mipsel64*|*mips64el*) echo "linux-mipsel64" ;;
+        *mips64*) echo "linux-mips64" ;;
+        *mipsel*) echo "linux-mipsel" ;;
+        *mips*) echo "linux-mips" ;;
+        *lexra*) echo "linux-lexra" ;;
+        *ppc*) echo "linux-ppc" ;;
+        *riscv64*) echo "linux-riscv64" ;;
+        *) return 1 ;;
+    esac
+}
+
 check_environment() {
     print_info "Проверка окружения..."
 
@@ -104,9 +135,13 @@ check_environment() {
     fi
 
     # Проверка архитектуры
-    local arch
-    arch=$(uname -m)
-    if [ "$arch" != "aarch64" ] && [ "$arch" != "arm64" ]; then
+    local arch entware_arch bin_arch
+    entware_arch=$(z2k_detect_entware_arch)
+    arch="${entware_arch:-$(uname -m)}"
+    bin_arch=$(z2k_map_arch_to_bin_arch "$arch" 2>/dev/null || true)
+    [ -n "$bin_arch" ] && print_info "Detected architecture: $arch -> $bin_arch"
+
+    if [ -z "$bin_arch" ]; then
         print_info "ВНИМАНИЕ: z2k разработан для ARM64 Keenetic"
         print_info "Ваша архитектура: $arch"
         printf "Продолжить? [y/N]: "

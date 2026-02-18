@@ -115,28 +115,62 @@ check_root() {
     return 0
 }
 
-# Получить архитектуру системы
-get_arch() {
-    uname -m
+# Получить архитектуру Entware (предпочтительно для выбора бинарников)
+get_entware_arch() {
+    local opkg_bin="opkg"
+    [ -x /opt/bin/opkg ] && opkg_bin="/opt/bin/opkg"
+    command -v "$opkg_bin" >/dev/null 2>&1 || return 1
+
+    "$opkg_bin" print-architecture 2>/dev/null | awk '
+        $1 == "arch" && $2 != "all" {
+            prio = ($3 ~ /^[0-9]+$/) ? $3 + 0 : 0
+            if (prio >= max) { max = prio; arch = $2 }
+        }
+        END { if (arch != "") print arch }
+    '
 }
 
-# Проверка архитектуры (только ARM64 для Keenetic)
+map_arch_to_bin_arch() {
+    case "$1" in
+        aarch64|arm64|*aarch64*|*arm64*) echo "linux-arm64" ;;
+        armv7l|armv6l|arm|*armv7*|*armv6*|arm*) echo "linux-arm" ;;
+        x86_64|amd64|*x86_64*|*amd64*) echo "linux-x86_64" ;;
+        i386|i486|i586|i686|x86) echo "linux-x86" ;;
+        *mipsel64*|*mips64el*) echo "linux-mipsel64" ;;
+        *mips64*) echo "linux-mips64" ;;
+        *mipsel*) echo "linux-mipsel" ;;
+        *mips*) echo "linux-mips" ;;
+        *lexra*) echo "linux-lexra" ;;
+        *ppc*) echo "linux-ppc" ;;
+        *riscv64*) echo "linux-riscv64" ;;
+        *) return 1 ;;
+    esac
+}
+
+# Получить архитектуру системы (с приоритетом Entware)
+get_arch() {
+    local entware_arch
+    entware_arch=$(get_entware_arch)
+    if [ -n "$entware_arch" ]; then
+        echo "$entware_arch"
+    else
+        uname -m
+    fi
+}
+
+# Проверка архитектуры
 check_arch() {
     local arch
     arch=$(get_arch)
 
-    case "$arch" in
-        aarch64|arm64)
-            return 0
-            ;;
-        *)
-            print_warning "Архитектура $arch не протестирована"
-            print_warning "z2k предназначен для ARM64 Keenetic роутеров"
-            printf "Продолжить? [y/N]: "
-            read -r answer </dev/tty
-            [ "$answer" = "y" ] || return 1
-            ;;
-    esac
+    if map_arch_to_bin_arch "$arch" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    print_warning "Архитектура $arch не поддерживается автоопределением"
+    printf "Продолжить? [y/N]: "
+    read -r answer </dev/tty
+    [ "$answer" = "y" ] || return 1
     return 0
 }
 

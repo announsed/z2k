@@ -632,25 +632,48 @@ step_build_zapret2() {
         print_info "Попытка ручной установки..."
 
         # Fallback: ручная установка если install_bin.sh не сработал
-        local arch=$(uname -m)
-        local bin_arch=""
+        local sys_arch entware_arch arch bin_arch opkg_bin
+        sys_arch=$(uname -m)
+        entware_arch=""
+        opkg_bin="opkg"
+        [ -x /opt/bin/opkg ] && opkg_bin="/opt/bin/opkg"
+
+        if command -v "$opkg_bin" >/dev/null 2>&1; then
+            entware_arch=$("$opkg_bin" print-architecture 2>/dev/null | awk '
+                $1 == "arch" && $2 != "all" {
+                    prio = ($3 ~ /^[0-9]+$/) ? $3 + 0 : 0
+                    if (prio >= max) { max = prio; arch = $2 }
+                }
+                END { if (arch != "") print arch }
+            ')
+        fi
+
+        arch="${entware_arch:-$sys_arch}"
+        bin_arch=""
 
         case "$arch" in
-            aarch64) bin_arch="linux-arm64" ;;
-            armv7l|armv6l|arm) bin_arch="linux-arm" ;;
-            x86_64) bin_arch="linux-x86_64" ;;
-            i386|i686) bin_arch="linux-x86" ;;
-            mips) bin_arch="linux-mips" ;;
-            mipsel) bin_arch="linux-mipsel" ;;
+            aarch64|arm64|*aarch64*|*arm64*) bin_arch="linux-arm64" ;;
+            armv7l|armv6l|arm|*armv7*|*armv6*|arm*) bin_arch="linux-arm" ;;
+            x86_64|amd64|*x86_64*|*amd64*) bin_arch="linux-x86_64" ;;
+            i386|i486|i586|i686|x86) bin_arch="linux-x86" ;;
+            *mipsel64*|*mips64el*) bin_arch="linux-mipsel64" ;;
+            *mips64*) bin_arch="linux-mips64" ;;
+            *mipsel*) bin_arch="linux-mipsel" ;;
+            *mips*) bin_arch="linux-mips" ;;
+            *lexra*) bin_arch="linux-lexra" ;;
+            *ppc*) bin_arch="linux-ppc" ;;
+            *riscv64*) bin_arch="linux-riscv64" ;;
         3)
             print_info "Применение новых дефолтных стратегий..."
             apply_new_default_strategies --auto
             ;;
             *)
-                print_error "Неподдерживаемая архитектура: $arch"
+                print_error "Unsupported architecture: $arch (uname=$sys_arch${entware_arch:+, opkg=$entware_arch})"
                 return 1
                 ;;
         esac
+
+        print_info "Auto-detected architecture: uname=$sys_arch${entware_arch:+, opkg=$entware_arch} -> $bin_arch"
 
         if [ ! -d "binaries/$bin_arch" ]; then
             print_error "Бинарники для $bin_arch не найдены"
