@@ -167,6 +167,102 @@ traffic_debug_enable_nfqws2_log()
 	NFQWS2_OPT_BASE="$NFQWS2_OPT_BASE --debug=@$Z2K_TRAFFIC_DEBUG_BASE/nfqws2.debug.log"
 }
 
+traffic_debug_build_tcpdump_filter()
+{
+	local tok list item
+	local tcp_ports=""
+	local udp_ports=""
+	local tcp_expr=""
+	local udp_expr=""
+	local filter=""
+
+	# Collect all TCP/UDP filter ports from every NFQWS2 profile (--new separated).
+	for tok in $NFQWS2_OPT; do
+		case "$tok" in
+			--filter-tcp=*)
+				list="${tok#--filter-tcp=}"
+				for item in $(echo "$list" | tr ',' ' '); do
+					case "$item" in
+						''|*[!0-9-]*)
+							continue
+							;;
+					esac
+					case " $tcp_ports " in
+						*" $item "*) ;;
+						*) tcp_ports="$tcp_ports $item" ;;
+					esac
+				done
+				;;
+			--filter-udp=*)
+				list="${tok#--filter-udp=}"
+				for item in $(echo "$list" | tr ',' ' '); do
+					case "$item" in
+						''|*[!0-9-]*)
+							continue
+							;;
+					esac
+					case " $udp_ports " in
+						*" $item "*) ;;
+						*) udp_ports="$udp_ports $item" ;;
+					esac
+				done
+				;;
+		esac
+	done
+
+	for item in $tcp_ports; do
+		case "$item" in
+			*-*)
+				local first="${item%-*}"
+				local last="${item#*-}"
+				case "$first$last" in
+					''|*[!0-9]*)
+						continue
+						;;
+				esac
+				[ -n "$tcp_expr" ] && tcp_expr="$tcp_expr or "
+				tcp_expr="${tcp_expr}portrange $first-$last"
+				;;
+			*)
+				[ -n "$tcp_expr" ] && tcp_expr="$tcp_expr or "
+				tcp_expr="${tcp_expr}port $item"
+				;;
+		esac
+	done
+
+	for item in $udp_ports; do
+		case "$item" in
+			*-*)
+				local first="${item%-*}"
+				local last="${item#*-}"
+				case "$first$last" in
+					''|*[!0-9]*)
+						continue
+						;;
+				esac
+				[ -n "$udp_expr" ] && udp_expr="$udp_expr or "
+				udp_expr="${udp_expr}portrange $first-$last"
+				;;
+			*)
+				[ -n "$udp_expr" ] && udp_expr="$udp_expr or "
+				udp_expr="${udp_expr}port $item"
+				;;
+		esac
+	done
+
+	[ -n "$tcp_expr" ] && filter="(tcp and ($tcp_expr))"
+	if [ -n "$udp_expr" ]; then
+		[ -n "$filter" ] && filter="$filter or "
+		filter="${filter}(udp and ($udp_expr))"
+	fi
+
+	if [ -z "$filter" ]; then
+		filter='(tcp and (port 80 or port 443 or port 2053 or port 2083 or port 2087 or port 2096 or port 8443)) or (udp and port 443)'
+	fi
+
+	echo "$filter"
+}
+
 traffic_debug_tcpdump_start()
 {
 	[ "$Z2K_TRAFFIC_DEBUG" = "1" ] || return 0
@@ -181,7 +277,8 @@ traffic_debug_tcpdump_start()
 
 	local pcap="$Z2K_TRAFFIC_DEBUG_BASE/traffic.pcap"
 	local err="$Z2K_TRAFFIC_DEBUG_BASE/tcpdump.err.log"
-	local filter='(tcp and (port 80 or port 443 or port 2053 or port 2083 or port 2087 or port 2096 or port 8443)) or (udp and port 443)'
+	local filter
+	filter="$(traffic_debug_build_tcpdump_filter)"
 
 	# Rotate by size to avoid filling storage: 10 files x 5MB = ~50MB max.
 	# NOTE: if tcpdump doesn't support -C/-W, it will fail; see tcpdump.err.log.
@@ -189,6 +286,7 @@ traffic_debug_tcpdump_start()
 	local pid=$!
 	echo "$pid" > "$Z2K_TRAFFIC_DEBUG_PIDFILE"
 	chmod 666 "$Z2K_TRAFFIC_DEBUG_PIDFILE" 2>/dev/null || true
+	echo "traffic debug: tcpdump filter: $filter"
 	echo "traffic debug: tcpdump started (PID $pid)"
 }
 
