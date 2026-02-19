@@ -281,6 +281,14 @@ download_init_script() {
         die "Ошибка загрузки files/000-zapret2.sh"
     fi
 
+    url="${GITHUB_RAW}/files/z2k-blocked-monitor.sh"
+    output="${files_dir}/z2k-blocked-monitor.sh"
+    if curl -fsSL "$url" -o "$output"; then
+        print_success "Загружено: files/z2k-blocked-monitor.sh"
+    else
+        die "Ошибка загрузки files/z2k-blocked-monitor.sh"
+    fi
+
     # z2k Lua helpers (e.g., persistent autocircular strategy memory)
     local lua_dir="${files_dir}/lua"
     mkdir -p "$lua_dir" || die "Не удалось создать $lua_dir"

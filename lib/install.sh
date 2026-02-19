@@ -724,6 +724,12 @@ step_build_zapret2() {
         cp -f "${WORK_DIR}/files/fake/"* "${ZAPRET2_DIR}/files/fake/" 2>/dev/null || true
     fi
 
+    # Install blocked-monitor helper (runtime diagnostics for blocked domains).
+    if [ -f "${WORK_DIR}/files/z2k-blocked-monitor.sh" ]; then
+        cp -f "${WORK_DIR}/files/z2k-blocked-monitor.sh" "${ZAPRET2_DIR}/z2k-blocked-monitor.sh" 2>/dev/null || true
+        chmod +x "${ZAPRET2_DIR}/z2k-blocked-monitor.sh" 2>/dev/null || true
+    fi
+
     # Copy snapshot domain lists for local install flow (no external list repos)
     if [ -d "${WORK_DIR}/files/lists" ]; then
         print_info "Copying snapshot domain lists..."
