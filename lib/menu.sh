@@ -717,7 +717,8 @@ menu_autotest() {
     printf "[3] Диапазон (укажите вручную)\n"
     printf "[4] Все стратегии (только HTTPS, %s шт, ~15 мин)\n" "$total_count"
     printf "[5] QUIC тест (UDP 443, ~5-10 мин)\n"
-    printf "[6] Blockcheck modern (custom + новые техники)\n"
+    printf "[6] Discord blockcheck modern (custom + новые техники)\n"
+    printf "[7] RuTracker blockcheck modern (custom + новые техники)\n"
     printf "[B] Назад\n\n"
 
     printf "Выберите режим: "
@@ -768,9 +769,16 @@ menu_autotest() {
             ;;
         6)
             clear_screen
-            print_info "Blockcheck modern: тест наших manual_* modern техник через blockcheck2 custom"
-            if confirm "Запустить blockcheck modern?" "Y"; then
-                run_blockcheck_modern
+            print_info "Discord blockcheck modern: тест наших manual_* modern техник через blockcheck2 custom"
+            if confirm "Запустить Discord blockcheck modern?" "Y"; then
+                run_blockcheck_modern "discord.com"
+            fi
+            ;;
+        7)
+            clear_screen
+            print_info "RuTracker blockcheck modern: тест наших manual_* modern техник через blockcheck2 custom (rutracker.org)"
+            if confirm "Запустить RuTracker blockcheck modern?" "Y"; then
+                run_blockcheck_modern "rutracker.org"
             fi
             ;;
         [Bb])

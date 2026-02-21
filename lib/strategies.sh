@@ -1869,6 +1869,8 @@ run_blockcheck_modern() {
     local domains="${1:-cloudflare-ech.com discord.com}"
     local ipvs="${2:-4}"
     local repeats="${3:-1}"
+    local export_file=""
+    local export_root="${ZAPRET2_DIR:-/opt/zapret2}"
 
     local blockcheck
     local blockcheck_dir
@@ -2009,6 +2011,20 @@ EOF
         num=$((num + 1))
     done < "$quic_candidates"
 
+    case "$domains" in
+        "discord.com")
+            export_file="${export_root}/discord_strat.txt"
+            ;;
+        "rutracker.org")
+            export_file="${export_root}/rutracker_strat.txt"
+            ;;
+    esac
+    if [ -n "$export_file" ]; then
+        cp -f "$combined_candidates" "$export_file" 2>/dev/null || {
+            print_warning "Не удалось сохранить подобранные стратегии в $export_file"
+        }
+    fi
+
     cat > "$summary_file" <<EOF
 # z2k blockcheck modern summary
 date=$(date)
@@ -2039,6 +2055,7 @@ EOF
     print_info "  blockcheck exit code: $blockcheck_rc"
     print_info "  Сводка: $summary_file"
     print_info "  Combined: $combined_candidates"
+    [ -n "$export_file" ] && print_info "  Exported: $export_file"
     print_info "  Log: $log_file"
 
     if [ "$tcp_count" -eq 0 ] && [ "$quic_count" -eq 0 ]; then
