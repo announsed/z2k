@@ -247,6 +247,18 @@ quic_strategy_exists() {
     [ -f "$conf" ] && grep -q "^${num}|" "$conf"
 }
 
+# Получить номер QUIC стратегии по имени секции (из quic_strategies.conf)
+get_quic_strategy_num_by_name() {
+    local name=$1
+    local conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR}/quic_strategies.conf}"
+
+    if [ -z "$name" ] || [ ! -f "$conf" ]; then
+        return 1
+    fi
+
+    grep "|${name}|" "$conf" | head -n 1 | cut -d'|' -f1
+}
+
 # Получить текущую QUIC стратегию
 get_current_quic_strategy() {
     local conf="${QUIC_STRATEGY_FILE:-${CONFIG_DIR}/quic_strategy.conf}"
@@ -1791,7 +1803,9 @@ apply_autocircular_strategies() {
     local yt_tcp=10
     local yt_gv=11
     local rkn=12
-    local quic=7
+    local quic
+    quic=$(get_quic_strategy_num_by_name "yt_quic_autocircular")
+    [ -z "$quic" ] && quic=7
 
     print_header "Применение autocircular стратегий"
     print_info "Будут применены следующие стратегии:"
