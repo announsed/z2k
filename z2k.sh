@@ -300,6 +300,14 @@ download_init_script() {
     else
         die "Ошибка загрузки files/lua/z2k-autocircular.lua"
     fi
+
+    url="${GITHUB_RAW}/files/lua/z2k-modern-core.lua"
+    output="${lua_dir}/z2k-modern-core.lua"
+    if curl -fsSL "$url" -o "$output"; then
+        print_success "Загружено: files/lua/z2k-modern-core.lua"
+    else
+        die "Ошибка загрузки files/lua/z2k-modern-core.lua"
+    fi
     # Snapshot domain lists used by local install flow (no external list repos)
     local list_file
     local lists_dir="${files_dir}/lists"

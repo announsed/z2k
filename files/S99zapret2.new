@@ -325,6 +325,8 @@ LUA_LOCKED="$ZAPRET_BASE/lua/locked.lua"
 [ -f "$LUA_LOCKED" ] && LUAOPT="$LUAOPT --lua-init=@$LUA_LOCKED"
 LUA_Z2K_AUTOCIRCULAR="$ZAPRET_BASE/lua/z2k-autocircular.lua"
 [ -f "$LUA_Z2K_AUTOCIRCULAR" ] && LUAOPT="$LUAOPT --lua-init=@$LUA_Z2K_AUTOCIRCULAR"
+LUA_Z2K_MODERN_CORE="$ZAPRET_BASE/lua/z2k-modern-core.lua"
+[ -f "$LUA_Z2K_MODERN_CORE" ] && LUAOPT="$LUAOPT --lua-init=@$LUA_Z2K_MODERN_CORE"
 NFQWS2_OPT_BASE="$USEROPT --fwmark=$DESYNC_MARK $LUAOPT"
 
 # Load custom TLS ClientHello blob for strategies (manual: --blob is engine init option).
