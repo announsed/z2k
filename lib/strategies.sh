@@ -1869,6 +1869,8 @@ run_blockcheck_modern() {
     local domains="${1:-discord.com}"
     local ipvs="${2:-4}"
     local repeats="${3:-1}"
+    local domains_count=0
+    local only_common=0
     local export_file=""
     local export_root="${ZAPRET2_DIR:-/opt/zapret2}"
 
@@ -1891,6 +1893,9 @@ run_blockcheck_modern() {
     local service_was_running=0
     local blockcheck_rc=0
     local rc_file="${out_dir}/blockcheck.rc"
+
+    domains_count=$(printf '%s\n' $domains | awk 'NF{c++} END{print c+0}')
+    [ "$domains_count" -gt 1 ] && only_common=1
 
     blockcheck=$(find_blockcheck2_script) || {
         print_error "blockcheck2.sh не найден (ожидался в /opt/zapret2)"
@@ -1919,6 +1924,7 @@ run_blockcheck_modern() {
     print_info "  blockcheck: $blockcheck"
     print_info "  profile: $test_profile"
     print_info "  domains: $domains"
+    [ "$only_common" = "1" ] && print_info "  collect mode: COMMON intersection (all domains)"
     print_info "  ipvs: $ipvs"
     print_info "  repeats: $repeats"
     print_info "  log: $log_file"
@@ -1957,22 +1963,44 @@ run_blockcheck_modern() {
     : > "$tcp_candidates"
     : > "$quic_candidates"
 
-    awk -v tcp="$tcp_candidates" -v quic="$quic_candidates" '
-        /^!!!!! .*working strategy found for ipv[46]/ {
+    awk -v tcp="$tcp_candidates" -v quic="$quic_candidates" -v only_common="$only_common" '
+        function emit_candidate(testname, line, params) {
+            if (!match(line, / : [^ ]+[[:space:]]+/)) return
+            params = substr(line, RSTART + RLENGTH)
+            sub(/[[:space:]]*!!!!![[:space:]]*$/, "", params)
+            sub(/[[:space:]]+$/, "", params)
+            if (params == "") return
+            if (params ~ /(^|[[:space:]])(not[[:space:]]+working|working[[:space:]]+without[[:space:]]+bypass|test[[:space:]]+aborted)/) return
+            if (testname ~ /http3/) {
+                print params >> quic
+            } else if (testname ~ /https_tls12|https_tls13/) {
+                print params >> tcp
+            }
+        }
+
+        # First successful strategy per test (legacy blockcheck marker)
+        (only_common != 1) && /^!!!!! .*working strategy found for ipv[46]/ {
             line = $0
             sub(/^!!!!![[:space:]]*/, "", line)
             split(line, a, ": working strategy found")
             testname = a[1]
-            pos = index(line, " : nfqws2 ")
-            if (pos > 0) {
-                params = substr(line, pos + 10)
-                sub(/[[:space:]]*!!!!![[:space:]]*$/, "", params)
-                if (testname ~ /http3/) {
-                    print params >> quic
-                } else if (testname ~ /https_tls12|https_tls13/) {
-                    print params >> tcp
-                }
-            }
+            emit_candidate(testname, line)
+        }
+
+        # Single-domain mode: collect all successful strategies from SUMMARY.
+        (only_common != 1) && /^curl_test_(https_tls12|https_tls13|http3) ipv[46] / {
+            line = $0
+            if (line ~ /(^|[[:space:]])(not[[:space:]]+working|working[[:space:]]+without[[:space:]]+bypass|test[[:space:]]+aborted)/) next
+            testname = $1
+            emit_candidate(testname, line)
+        }
+
+        # Multi-domain mode: keep only COMMON intersection strategies.
+        (only_common == 1) && /^curl_test_(https_tls12|https_tls13|http3) ipv[46][[:space:]]*:[[:space:]]/ {
+            line = $0
+            if (line ~ /(^|[[:space:]])(not[[:space:]]+working|working[[:space:]]+without[[:space:]]+bypass|test[[:space:]]+aborted)/) next
+            testname = $1
+            emit_candidate(testname, line)
         }
     ' "$log_file"
 
@@ -2015,7 +2043,7 @@ EOF
         "discord.com")
             export_file="${export_root}/discord_strat.txt"
             ;;
-        "rutracker.org")
+        "rutracker.org"|*"rutracker.org"*)
             export_file="${export_root}/rutracker_strat.txt"
             ;;
     esac
@@ -2030,8 +2058,10 @@ EOF
 date=$(date)
 blockcheck=$blockcheck
 domains=$domains
+domains_count=$domains_count
 ipvs=$ipvs
 repeats=$repeats
+collect_mode=$([ "$only_common" = "1" ] && echo "common_intersection" || echo "all_successes")
 blockcheck_exit_code=$blockcheck_rc
 tls_candidates=$tcp_count
 quic_candidates=$quic_count
