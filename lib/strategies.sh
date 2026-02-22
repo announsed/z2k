@@ -1862,11 +1862,11 @@ prepare_blockcheck_modern_profile() {
 }
 
 # Запустить blockcheck2 на наших modern списках и собрать candidate-стратегии
-# $1 - domains (optional, default: youtube + googlevideo)
+# $1 - domains (optional, default: discord.com)
 # $2 - ip versions: 4, 6, 46 (optional, default: 4)
 # $3 - repeats per test (optional, default: 1)
 run_blockcheck_modern() {
-    local domains="${1:-cloudflare-ech.com discord.com}"
+    local domains="${1:-discord.com}"
     local ipvs="${2:-4}"
     local repeats="${3:-1}"
     local export_file=""

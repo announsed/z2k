@@ -719,6 +719,7 @@ menu_autotest() {
     printf "[5] QUIC тест (UDP 443, ~5-10 мин)\n"
     printf "[6] Discord blockcheck modern (custom + новые техники)\n"
     printf "[7] RuTracker blockcheck modern (custom + новые техники)\n"
+    printf "[8] Cloudflare ECH blockcheck modern (custom + modern techniques)\n"
     printf "[B] Назад\n\n"
 
     printf "Выберите режим: "
@@ -779,6 +780,13 @@ menu_autotest() {
             print_info "RuTracker blockcheck modern: тест наших manual_* modern техник через blockcheck2 custom (rutracker.org)"
             if confirm "Запустить RuTracker blockcheck modern?" "Y"; then
                 run_blockcheck_modern "rutracker.org"
+            fi
+            ;;
+        8)
+            clear_screen
+            print_info "Cloudflare ECH blockcheck modern: test manual_* modern techniques via blockcheck2 custom (cloudflare-ech.com)"
+            if confirm "Run Cloudflare ECH blockcheck modern?" "Y"; then
+                run_blockcheck_modern "cloudflare-ech.com"
             fi
             ;;
         [Bb])
