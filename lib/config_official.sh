@@ -240,6 +240,106 @@ EOF
     rkn_tcp=$(ensure_circular_payload_empty "$rkn_tcp")
     cf_tcp=$(ensure_circular_payload_empty "$cf_tcp")
 
+    # Fill TCP autocircular gaps with primitives that exist in nfqws2
+    # but were not guaranteed in current z2k profile packs.
+    ensure_tcp_gap_primitives() {
+        local input="$1"
+        local out="$input"
+        local max_strategy=""
+        local next_strategy=1
+        local has_new=0
+
+        [ -n "$input" ] || {
+            printf '%s' "$input"
+            return
+        }
+        case "$input" in
+            *"--lua-desync=circular:"*) ;;
+            *)
+                printf '%s' "$input"
+                return
+                ;;
+        esac
+
+        case "$out" in
+            *" --new")
+                out="${out% --new}"
+                has_new=1
+                ;;
+        esac
+
+        max_strategy=$(
+            printf '%s\n' "$input" \
+                | tr ' ' '\n' \
+                | sed -n 's/.*:strategy=\([0-9][0-9]*\)$/\1/p' \
+                | sort -n \
+                | tail -1
+        )
+        [ -n "$max_strategy" ] && next_strategy=$((max_strategy + 1))
+
+        case "$out" in
+            *"--lua-desync=tcpseg:pos=0,-1:seqovl=1"*) ;;
+            *)
+                out="$out --payload=tls_client_hello --lua-desync=tcpseg:pos=0,-1:seqovl=1:strategy=$next_strategy --lua-desync=drop:strategy=$next_strategy"
+                next_strategy=$((next_strategy + 1))
+                ;;
+        esac
+
+        case "$out" in
+            *"--lua-desync=tcpseg:pos=0,-1:seqovl=16:seqovl_pattern=tls_max_ru"*) ;;
+            *)
+                out="$out --payload=tls_client_hello --lua-desync=tcpseg:pos=0,-1:seqovl=16:seqovl_pattern=tls_max_ru:strategy=$next_strategy --lua-desync=drop:strategy=$next_strategy"
+                next_strategy=$((next_strategy + 1))
+                ;;
+        esac
+
+        case "$out" in
+            *"--lua-desync=oob:urp=midsld"*) ;;
+            *)
+                out="$out --in-range=-s1 --payload=tls_client_hello --lua-desync=oob:urp=midsld:strategy=$next_strategy --in-range=x"
+                next_strategy=$((next_strategy + 1))
+                ;;
+        esac
+
+        case "$out" in
+            *"hostfakesplit:disorder_after"*) ;;
+            *)
+                out="$out --payload=tls_client_hello --lua-desync=hostfakesplit:disorder_after:tcp_md5:strategy=$next_strategy"
+                next_strategy=$((next_strategy + 1))
+                ;;
+        esac
+
+        case "$out" in
+            *"--lua-desync=http_hostcase:"*) ;;
+            *)
+                out="$out --payload=http_req --lua-desync=http_hostcase:strategy=$next_strategy"
+                next_strategy=$((next_strategy + 1))
+                ;;
+        esac
+
+        case "$out" in
+            *"--lua-desync=http_domcase:"*) ;;
+            *)
+                out="$out --payload=http_req --lua-desync=http_domcase:strategy=$next_strategy"
+                next_strategy=$((next_strategy + 1))
+                ;;
+        esac
+
+        case "$out" in
+            *"--lua-desync=http_methodeol:"*) ;;
+            *)
+                out="$out --payload=http_req --lua-desync=http_methodeol:strategy=$next_strategy"
+                ;;
+        esac
+
+        [ "$has_new" -eq 1 ] && out="$out --new"
+        printf '%s' "$out"
+    }
+
+    rkn_tcp=$(ensure_tcp_gap_primitives "$rkn_tcp")
+    cf_tcp=$(ensure_tcp_gap_primitives "$cf_tcp")
+    discord_tcp_block=$(ensure_tcp_gap_primitives "$discord_tcp_block")
+
     # Генерировать NFQWS2_OPT в формате официального config
     # ������������ NFQWS2_OPT � ������� ������������ config
     local nfqws2_opt_lines=""

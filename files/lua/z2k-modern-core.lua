@@ -248,6 +248,198 @@ local function z2k_payload_pad(payload, pad_min, pad_max)
     return p .. string.rep("\0", n)
 end
 
+local z2k_unpack = table.unpack or unpack
+
+local function z2k_quic_reserved_version_bytes()
+    -- RFC-reserved grease-like pattern: 0x?a?a?a?a
+    local b1 = bitor(bitlshift(math.random(0, 15), 4), 0x0A)
+    local b2 = bitor(bitlshift(math.random(0, 15), 4), 0x0A)
+    local b3 = bitor(bitlshift(math.random(0, 15), 4), 0x0A)
+    local b4 = bitor(bitlshift(math.random(0, 15), 4), 0x0A)
+    return b1, b2, b3, b4
+end
+
+local function z2k_qvarint_decode_bytes(bytes, pos, nbytes)
+    local b0 = bytes and bytes[pos]
+    if not b0 then
+        return nil, nil
+    end
+    local pref = bitrshift(b0, 6)
+    local len = 1
+    if pref == 1 then
+        len = 2
+    elseif pref == 2 then
+        len = 4
+    elseif pref == 3 then
+        len = 8
+    end
+    if (pos + len - 1) > (nbytes or #bytes) then
+        return nil, nil
+    end
+    local v = bitand(b0, 0x3F)
+    for i = 2, len do
+        v = (v * 256) + (bytes[pos + i - 1] or 0)
+    end
+    return v, len
+end
+
+local function z2k_qvarint_encode_bytes(value, force_len)
+    local v = tonumber(value) or 0
+    if v < 0 then v = 0 end
+    local len = tonumber(force_len)
+    if not len then
+        if v < 64 then
+            len = 1
+        elseif v < 16384 then
+            len = 2
+        elseif v < 1073741824 then
+            len = 4
+        else
+            len = 8
+        end
+    end
+    if len ~= 1 and len ~= 2 and len ~= 4 and len ~= 8 then
+        return nil, nil
+    end
+
+    local maxv = 63
+    if len == 2 then
+        maxv = 16383
+    elseif len == 4 then
+        maxv = 1073741823
+    elseif len == 8 then
+        maxv = 4611686018427387903
+    end
+    if v > maxv then v = maxv end
+
+    local out = {}
+    for i = len, 1, -1 do
+        out[i] = v % 256
+        v = math.floor(v / 256)
+    end
+    local pref = 0
+    if len == 2 then
+        pref = bitlshift(1, 6)
+    elseif len == 4 then
+        pref = bitlshift(2, 6)
+    elseif len == 8 then
+        pref = bitlshift(3, 6)
+    end
+    out[1] = bitor(out[1] or 0, pref)
+    return out, len
+end
+
+local function z2k_quic_randomize_range(bytes, pos, count)
+    if not bytes or not pos or not count or count <= 0 then
+        return
+    end
+    local n = #bytes
+    local p = tonumber(pos) or 1
+    local c = tonumber(count) or 0
+    if p < 1 then p = 1 end
+    if p > n then return end
+    local pend = p + c - 1
+    if pend > n then pend = n end
+    for i = p, pend do
+        bytes[i] = math.random(0, 255)
+    end
+end
+
+local function z2k_quic_morph_payload(payload, arg)
+    if type(payload) ~= "string" then
+        return payload
+    end
+    local n = #payload
+    if n < 12 then
+        return payload
+    end
+
+    local b = { string.byte(payload, 1, n) }
+    local h1 = b[1]
+    -- Only long-header QUIC packets are handled here.
+    if not h1 or bitand(h1, 0x80) == 0 then
+        return payload
+    end
+
+    local version_chance = z2k_clamp(arg.version_chance, 0, 100, 35)
+    local cid_chance = z2k_clamp(arg.cid_chance, 0, 100, 80)
+    local token_chance = z2k_clamp(arg.token_chance, 0, 100, 60)
+    local token_fill_chance = z2k_clamp(arg.token_fill_chance, 0, 100, 35)
+    local token_fill_len = z2k_clamp(arg.token_fill_len, 1, 8, 1)
+
+    if version_chance > 0 and math.random(100) <= version_chance and n >= 5 then
+        local v1, v2, v3, v4 = z2k_quic_reserved_version_bytes()
+        b[2], b[3], b[4], b[5] = v1, v2, v3, v4
+    end
+
+    local pos = 6
+    if pos > #b then
+        return string.char(z2k_unpack(b))
+    end
+
+    local dcid_len = b[pos] or 0
+    pos = pos + 1
+    if dcid_len < 0 then dcid_len = 0 end
+    if (pos + dcid_len - 1) > #b then
+        return string.char(z2k_unpack(b))
+    end
+    if dcid_len > 0 and cid_chance > 0 and math.random(100) <= cid_chance then
+        z2k_quic_randomize_range(b, pos, dcid_len)
+    end
+    pos = pos + dcid_len
+
+    if pos > #b then
+        return string.char(z2k_unpack(b))
+    end
+    local scid_len = b[pos] or 0
+    pos = pos + 1
+    if scid_len < 0 then scid_len = 0 end
+    if (pos + scid_len - 1) > #b then
+        return string.char(z2k_unpack(b))
+    end
+    if scid_len > 0 and cid_chance > 0 and math.random(100) <= cid_chance then
+        z2k_quic_randomize_range(b, pos, scid_len)
+    end
+    pos = pos + scid_len
+
+    if pos > #b then
+        return string.char(z2k_unpack(b))
+    end
+    local token_len, token_vlen = z2k_qvarint_decode_bytes(b, pos, #b)
+    if token_len == nil then
+        return string.char(z2k_unpack(b))
+    end
+    local token_pos = pos + token_vlen
+    local token_end = token_pos + token_len - 1
+
+    if token_len > 0 then
+        if token_end <= #b and token_chance > 0 and math.random(100) <= token_chance then
+            z2k_quic_randomize_range(b, token_pos, token_len)
+        end
+    elseif token_fill_chance > 0 and math.random(100) <= token_fill_chance then
+        -- Token fill for empty-token Initial packets.
+        -- Conservative path: only 1-byte token length varint is expanded.
+        if token_vlen == 1 and token_fill_len < 64 then
+            local enc, enc_len = z2k_qvarint_encode_bytes(token_fill_len, 1)
+            if enc and enc_len == 1 then
+                b[pos] = enc[1]
+                for i = 1, token_fill_len do
+                    table.insert(b, token_pos + i - 1, math.random(0, 255))
+                end
+
+                -- Best-effort packet length varint correction (only 1-byte encoding).
+                local plen_pos = token_pos + token_fill_len
+                local plen, plen_vlen = z2k_qvarint_decode_bytes(b, plen_pos, #b)
+                if plen and plen_vlen == 1 and plen <= (63 - token_fill_len) then
+                    b[plen_pos] = plen + token_fill_len
+                end
+            end
+        end
+    end
+
+    return string.char(z2k_unpack(b))
+end
+
 local function z2k_rawsend_ctx(desync, repeats)
     local arg = desync and desync.arg or {}
     return {
@@ -690,6 +882,12 @@ end
 --   profile=1|2|3                      ; optional forced profile
 --   noise=1..3                         ; number of badsum fake packets
 --   pad_min=8 pad_max=64               ; extra bytes in fake noise payloads
+--   version_chance=35                  ; chance (%) to spoof QUIC version in fakes
+--   cid_chance=80                      ; chance (%) to randomize CID bytes in fakes
+--   token_chance=60                    ; chance (%) to randomize non-empty token bytes
+--   token_fill_chance=35               ; chance (%) to fill empty token in fakes
+--   token_fill_len=1                   ; inserted token size for empty-token fill
+--   live_chance=0                      ; optional chance (%) to morph live outgoing packet
 --   nodrop                             ; keep original packet
 function z2k_quic_morph_v2(ctx, desync)
     if not desync or not desync.dis or not desync.dis.udp then
@@ -728,6 +926,7 @@ function z2k_quic_morph_v2(ctx, desync)
     local noise = z2k_clamp(arg.noise, 0, 3, 1)
     local pad_min = z2k_clamp(arg.pad_min, 0, 512, 8)
     local pad_max = z2k_clamp(arg.pad_max, 0, 1024, 64)
+    local live_chance = z2k_clamp(arg.live_chance, 0, 100, 0)
     local rs = z2k_rawsend_ctx(desync, 1)
     local base_payload = desync.dis.payload or ""
 
@@ -735,11 +934,15 @@ function z2k_quic_morph_v2(ctx, desync)
         for i = 1, noise do
             local fake = deepcopy(desync.dis)
             fake.payload = z2k_payload_pad(base_payload, pad_min, pad_max)
+            fake.payload = z2k_quic_morph_payload(fake.payload, arg)
             rawsend_dissect(fake, rs, { badsum = true })
         end
     end
 
     local out_dis = deepcopy(desync.dis)
+    if live_chance > 0 and math.random(100) <= live_chance then
+        out_dis.payload = z2k_quic_morph_payload(out_dis.payload, arg)
+    end
     local ipfrag = nil
     if profile == 1 then
         ipfrag = {

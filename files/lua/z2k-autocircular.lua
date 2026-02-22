@@ -646,6 +646,45 @@ end
 -- Failure detector: treat any inbound fatal TLS alert record as a failure.
 -- This helps autocircular rotate on early handshake aborts (e.g. Cloudflare ECH),
 -- which are not counted by the standard retransmission-based detector.
+local function z2k_tcp_flag_set(dis, mask, letter)
+  local tcp = dis and dis.tcp
+  if not tcp then return false end
+  local flags = tcp.th_flags
+  if type(flags) == "number" then
+    return bitand(flags, mask) ~= 0
+  end
+  if type(flags) == "string" and letter and letter ~= "" then
+    return flags:find(letter, 1, true) ~= nil
+  end
+  return false
+end
+
+local function z2k_http_block_reply(payload)
+  if type(payload) ~= "string" then return false end
+  local code_s = payload:match("^HTTP/%d%.%d%s+([0-9][0-9][0-9])")
+  local code = tonumber(code_s)
+  if not code then return false end
+
+  if code == 403 or code == 451 then
+    return true
+  end
+  if code ~= 302 and code ~= 307 and code ~= 308 then
+    return false
+  end
+
+  local low = string.lower(payload)
+  if not low:find("\r\nlocation:", 1, true) then
+    return false
+  end
+  if low:find("block", 1, true) or
+     low:find("forbidden", 1, true) or
+     low:find("zapret", 1, true) or
+     low:find("rkn", 1, true) then
+    return true
+  end
+  return false
+end
+
 function z2k_tls_alert_fatal(desync, crec)
   if type(standard_failure_detector) == "function" then
     local ok, res = pcall(standard_failure_detector, desync, crec)
@@ -654,7 +693,22 @@ function z2k_tls_alert_fatal(desync, crec)
 
   if not desync or desync.outgoing then return false end
   local dis = desync.dis
+
+  -- Transport-layer hard failures.
+  if z2k_tcp_flag_set(dis, 0x04, "R") then
+    return true
+  end
+  if z2k_tcp_flag_set(dis, 0x01, "F") then
+    local pfin = dis and dis.payload
+    if type(pfin) ~= "string" or #pfin == 0 then
+      return true
+    end
+  end
+
   local payload = dis and dis.payload
+  if z2k_http_block_reply(payload) then
+    return true
+  end
   if type(payload) ~= "string" then return false end
   if #payload < 7 then return false end
   if payload:byte(1) ~= 0x15 then return false end -- TLS record: alert (21)
