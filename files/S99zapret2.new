@@ -444,6 +444,12 @@ QUIC_GOOGLE_BLOB="$ZAPRET_BASE/files/fake/quic_initial_www_google_com.bin"
 QUIC5_BLOB="$ZAPRET_BASE/files/fake/quic_5.bin"
 [ -s "$QUIC5_BLOB" ] && NFQWS2_OPT_BASE="$NFQWS2_OPT_BASE --blob=quic5:@$QUIC5_BLOB"
 
+QUIC4_BLOB="$ZAPRET_BASE/files/fake/quic_4.bin"
+[ -s "$QUIC4_BLOB" ] && NFQWS2_OPT_BASE="$NFQWS2_OPT_BASE --blob=quic4:@$QUIC4_BLOB"
+
+QUIC6_BLOB="$ZAPRET_BASE/files/fake/quic_6.bin"
+[ -s "$QUIC6_BLOB" ] && NFQWS2_OPT_BASE="$NFQWS2_OPT_BASE --blob=quic6:@$QUIC6_BLOB"
+
 QUIC1_BLOB="$ZAPRET_BASE/files/fake/quic_1.bin"
 [ -s "$QUIC1_BLOB" ] && NFQWS2_OPT_BASE="$NFQWS2_OPT_BASE --blob=quic1:@$QUIC1_BLOB"
 
