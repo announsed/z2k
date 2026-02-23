@@ -918,11 +918,11 @@ auto_test_youtube_gv() {
     return 1
 }
 
-# Автотест RKN (meduza.io, facebook.com, rutracker.org)
+# Автотест RKN (rutracker.org)
 # Тестирует все стратегии для RKN доменов и возвращает номер первой работающей
 auto_test_rkn() {
     local strategies_list="${1:-$(get_all_strategies_list)}"
-    local test_domains="meduza.io facebook.com rutracker.org"
+    local test_domains="rutracker.org"
     local tested=0
     local total=0
 
@@ -936,7 +936,7 @@ auto_test_rkn() {
         return 1
     fi
 
-    print_info "Тестирование RKN (meduza.io, facebook.com, rutracker.org)..." >&2
+    print_info "Тестирование RKN (rutracker.org)..." >&2
 
     for num in $strategies_list; do
         tested=$((tested + 1))
@@ -1116,7 +1116,7 @@ auto_test_all_categories_v2() {
     print_info "Будут протестированы стратегии для каждой категории:"
     print_info "  - YouTube TCP (youtube.com)"
     print_info "  - YouTube GV (googlevideo CDN)"
-    print_info "  - RKN (meduza.io, facebook.com, rutracker.org)"
+    print_info "  - RKN (rutracker.org)"
     print_info "Это займет около 8-10 минут"
     printf "\n"
 
