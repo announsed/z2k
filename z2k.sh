@@ -12,7 +12,7 @@ set -e
 Z2K_VERSION="2.0.1"
 WORK_DIR="/tmp/z2k"
 LIB_DIR="${WORK_DIR}/lib"
-GITHUB_RAW="https://raw.githubusercontent.com/necronicle/z2k/zapret-modern"
+GITHUB_RAW="https://raw.githubusercontent.com/necronicle/z2k/master"
 
 # Экспортировать переменные для использования в функциях
 export WORK_DIR
@@ -367,12 +367,11 @@ show_welcome() {
 
     cat <<'EOF'
 +===================================================+
-|   z2k - Zapret2 для Keenetic (ALPHA)            |
+|   z2k - Zapret2 для Keenetic (BETA)             |
 |                   Версия 2.0.0                    |
 +===================================================+
 
-  [WARN]  ВНИМАНИЕ: Проект в активной разработке!
-  [WARN]  Это пре-альфа версия - НЕ используйте в production!
+  [INFO]  Проект в активной разработке. Статус: beta.
 
   GitHub: https://github.com/necronicle/z2k
 
@@ -484,7 +483,7 @@ show_help() {
   - Если zapret2 установлен: откроет меню
 
 Примеры:
-  curl -fsSL https://raw.githubusercontent.com/necronicle/z2k/zapret-modern/z2k.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/necronicle/z2k/master/z2k.sh | sh
   sh z2k.sh install
   sh z2k.sh menu
   sh z2k.sh check
