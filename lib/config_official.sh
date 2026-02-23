@@ -17,10 +17,8 @@ generate_nfqws2_opt_from_strategies() {
     local youtube_tcp_tcp=""
     local youtube_gv_tcp=""
     local rkn_tcp=""
-    local cf_tcp=""
     local quic_udp=""
     local quic_custom_udp=""
-    local quic_cf_udp=""
     local discord_tcp=""
     local discord_udp=""
     local custom_tcp=""
@@ -38,19 +36,12 @@ generate_nfqws2_opt_from_strategies() {
         rkn_tcp=$(cat "${extra_strats_dir}/TCP/RKN/Strategy.txt")
     fi
 
-    if [ -f "${extra_strats_dir}/TCP/CF/Strategy.txt" ]; then
-        cf_tcp=$(cat "${extra_strats_dir}/TCP/CF/Strategy.txt")
-    fi
-
     # YouTube QUIC autocircular modern (12 strategies, z2k morph prioritized).
     # key=yt_quic ensures stable persistence key; nld=2 reduces churn on CDN subdomains.
     quic_udp="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=4:key=yt_quic:nld=2 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:noise=2:pad_min=12:pad_max=72:strategy=1 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:profile=2:noise=2:pad_min=8:pad_max=64:ipfrag_pos_udp=16:ipfrag_pos2=56:ipfrag_overlap12=16:ipfrag_overlap23=8:strategy=2 --lua-desync=z2k_timing_morph:payload=quic_initial:dir=out:packets=2:chance=85:fakes=2:pad_min=12:pad_max=72:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=3:ip_autottl=-2,3-20:strategy=3 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=3 --lua-desync=drop:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=4:ip_autottl=-2,3-20:strategy=4 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=4 --lua-desync=drop:strategy=4 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_rutracker:repeats=6:strategy=5 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3:ipfrag_pos_udp=16:ipfrag_pos2=48:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=5 --lua-desync=drop:strategy=5 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:ip_autottl=-2,3-20:strategy=6 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:ip_autottl=-2,3-20:strategy=7 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=16:strategy=7 --lua-desync=drop:strategy=7 --lua-desync=udplen:payload=quic_initial:dir=out:increment=4:strategy=8 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=8 --lua-desync=udplen:payload=quic_initial:dir=out:increment=8:pattern=0xFEA82025:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=0x00000000000000000000000000000000:repeats=2:payload=all:strategy=10 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=10 --lua-desync=drop:strategy=10 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:ip_autottl=-2,3-20:strategy=11 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=24:strategy=11 --lua-desync=drop:strategy=11 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=12"
 
     # QUIC Custom autocircular modern (12 strategies, same core as YouTube QUIC).
     quic_custom_udp="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=4:key=custom_quic:nld=2 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:noise=2:pad_min=12:pad_max=72:strategy=1 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:profile=2:noise=2:pad_min=8:pad_max=64:ipfrag_pos_udp=16:ipfrag_pos2=56:ipfrag_overlap12=16:ipfrag_overlap23=8:strategy=2 --lua-desync=z2k_timing_morph:payload=quic_initial:dir=out:packets=2:chance=85:fakes=2:pad_min=12:pad_max=72:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=3:ip_autottl=-2,3-20:strategy=3 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=3 --lua-desync=drop:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=4:ip_autottl=-2,3-20:strategy=4 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=4 --lua-desync=drop:strategy=4 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_rutracker:repeats=6:strategy=5 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3:ipfrag_pos_udp=16:ipfrag_pos2=48:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=5 --lua-desync=drop:strategy=5 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:ip_autottl=-2,3-20:strategy=6 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:ip_autottl=-2,3-20:strategy=7 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=16:strategy=7 --lua-desync=drop:strategy=7 --lua-desync=udplen:payload=quic_initial:dir=out:increment=4:strategy=8 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=8 --lua-desync=udplen:payload=quic_initial:dir=out:increment=8:pattern=0xFEA82025:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=0x00000000000000000000000000000000:repeats=2:payload=all:strategy=10 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=10 --lua-desync=drop:strategy=10 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:ip_autottl=-2,3-20:strategy=11 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=24:strategy=11 --lua-desync=drop:strategy=11 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=12"
-
-    # Cloudflare QUIC autocircular modern (12 strategies, profile-2 prioritized).
-    quic_cf_udp="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:retrans=3:time=60:udp_in=1:udp_out=4:key=cf_quic:nld=2 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:profile=2:noise=2:pad_min=8:pad_max=64:ipfrag_pos_udp=16:ipfrag_pos2=56:ipfrag_overlap12=16:ipfrag_overlap23=8:strategy=1 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:noise=2:pad_min=12:pad_max=72:strategy=2 --lua-desync=z2k_timing_morph:payload=quic_initial:dir=out:packets=2:chance=85:fakes=2:pad_min=12:pad_max=72:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_google:repeats=3:ip_autottl=-2,3-20:strategy=3 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3:ipfrag_pos_udp=16:ipfrag_pos2=48:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=3 --lua-desync=drop:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_google:repeats=6:payload=all:ip_autottl=-2,3-20:strategy=4 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3:ipfrag_pos_udp=16:ipfrag_pos2=48:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=4 --lua-desync=drop:strategy=4 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=4:payload=all:ip_autottl=-2,3-20:strategy=5 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=5 --lua-desync=drop:strategy=5 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_google:repeats=10:payload=all:ip_autottl=-2,3-20:strategy=6 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:payload=all:strategy=7 --lua-desync=udplen:payload=quic_initial:dir=out:increment=4:strategy=8 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=8 --lua-desync=udplen:payload=quic_initial:dir=out:increment=8:pattern=0xFEA82025:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=0x00000000000000000000000000000000:repeats=2:payload=all:strategy=10 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=10 --lua-desync=drop:strategy=10 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_google:repeats=11:strategy=11 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=12"
 
     # If category strategy files exist, prefer them over hardcoded QUIC defaults.
     if [ -f "${extra_strats_dir}/UDP/YT/Strategy.txt" ]; then
@@ -59,10 +50,6 @@ generate_nfqws2_opt_from_strategies() {
     if [ -f "${extra_strats_dir}/UDP/CUSTOM/Strategy.txt" ]; then
         quic_custom_udp=$(cat "${extra_strats_dir}/UDP/CUSTOM/Strategy.txt")
     fi
-    if [ -f "${extra_strats_dir}/UDP/CF/Strategy.txt" ]; then
-        quic_cf_udp=$(cat "${extra_strats_dir}/UDP/CF/Strategy.txt")
-    fi
-
     # Discord TCP profiles from zapret4rocket are absent; disable dedicated TCP Discord profile.
     local discord_tcp_block=""
 
@@ -76,46 +63,8 @@ generate_nfqws2_opt_from_strategies() {
     [ -z "$youtube_tcp_tcp" ] && youtube_tcp_tcp="$default_strategy"
     [ -z "$youtube_gv_tcp" ] && youtube_gv_tcp="$default_strategy"
     [ -z "$rkn_tcp" ] && rkn_tcp="$default_strategy"
-    [ -z "$cf_tcp" ] && cf_tcp="$rkn_tcp"
-    [ -z "$quic_cf_udp" ] && quic_cf_udp="$quic_custom_udp"
     [ -z "$quic_custom_udp" ] && quic_custom_udp="--filter-udp=443 --filter-l7=quic --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
     custom_tcp="$default_strategy"
-
-    # Cloudflare runs in a dedicated, more aggressive circular profile.
-    # Keep strategy actions as-is, only normalize circular control arguments.
-    normalize_cf_circular() {
-        local input="$1"
-        local out=""
-        local token=""
-        local opts=""
-        local part=""
-        local rest=""
-        local old_ifs="$IFS"
-
-        for token in $input; do
-            case "$token" in
-                --lua-desync=circular:*)
-                    opts="${token#--lua-desync=circular:}"
-                    rest=""
-                    IFS=':'
-                    for part in $opts; do
-                        case "$part" in
-                            fails=*|retrans=*|time=*|key=*|nld=*) ;;
-                            *) rest="${rest:+$rest:}$part" ;;
-                        esac
-                    done
-                    IFS="$old_ifs"
-                    token="--lua-desync=circular:fails=3:retrans=3:time=60:key=cf_tcp:nld=2:failure_detector=z2k_tls_alert_fatal"
-                    [ -n "$rest" ] && token="$token:$rest"
-                    ;;
-            esac
-            out="${out:+$out }$token"
-        done
-
-        IFS="$old_ifs"
-        printf '%s' "$out"
-    }
-    cf_tcp=$(normalize_cf_circular "$cf_tcp")
 
     # Force domain-level memory for all autocircular profiles.
     # This prevents churn on frequently changing subdomains.
@@ -185,10 +134,8 @@ generate_nfqws2_opt_from_strategies() {
     youtube_tcp_tcp=$(ensure_circular_failure_detector "$youtube_tcp_tcp")
     youtube_gv_tcp=$(ensure_circular_failure_detector "$youtube_gv_tcp")
     rkn_tcp=$(ensure_circular_failure_detector "$rkn_tcp")
-    cf_tcp=$(ensure_circular_failure_detector "$cf_tcp")
     quic_udp=$(ensure_circular_failure_detector "$quic_udp")
     quic_custom_udp=$(ensure_circular_failure_detector "$quic_custom_udp")
-    quic_cf_udp=$(ensure_circular_failure_detector "$quic_cf_udp")
 
     # Ensure circular sees TCP RST/FIN packets without payload (payload_type=empty),
     # otherwise early connection aborts can be invisible to failure detectors.
@@ -245,7 +192,6 @@ generate_nfqws2_opt_from_strategies() {
     youtube_tcp_tcp=$(ensure_circular_payload_empty "$youtube_tcp_tcp")
     youtube_gv_tcp=$(ensure_circular_payload_empty "$youtube_gv_tcp")
     rkn_tcp=$(ensure_circular_payload_empty "$rkn_tcp")
-    cf_tcp=$(ensure_circular_payload_empty "$cf_tcp")
 
     # Fill TCP autocircular gaps with primitives that exist in nfqws2
     # but were not guaranteed in current z2k profile packs.
@@ -344,14 +290,12 @@ generate_nfqws2_opt_from_strategies() {
     }
 
     rkn_tcp=$(ensure_tcp_gap_primitives "$rkn_tcp")
-    cf_tcp=$(ensure_tcp_gap_primitives "$cf_tcp")
     discord_tcp_block=$(ensure_tcp_gap_primitives "$discord_tcp_block")
 
     # Генерировать NFQWS2_OPT в формате официального config
-    # ������������ NFQWS2_OPT � ������� ������������ config
     local nfqws2_opt_lines=""
 
-    # Helper: �������� ������ ���� hostlist ���������� � �� ������
+    # Helper: проверить наличие и непустоту hostlist-файлов
     add_hostlist_line() {
         local list_path="$1"
         shift
@@ -370,13 +314,13 @@ generate_nfqws2_opt_from_strategies() {
     # YouTube TCP
     add_hostlist_line "${extra_strats_dir}/TCP/YT/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/TCP/YT/List.txt $youtube_tcp_tcp --new"
 
-    # YouTube GV (domains list �������)
+    # YouTube GV (список доменов статичен)
     nfqws2_opt_lines="$nfqws2_opt_lines--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist-domains=googlevideo.com $youtube_gv_tcp --new\\n"
 
     # QUIC YT
     add_hostlist_line "${extra_strats_dir}/UDP/YT/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/UDP/YT/List.txt $quic_udp --new"
 
-    # Discord TCP: currently disabled for z4r-aligned profile set.
+    # Discord TCP: currently disabled for autocircular profile set.
     if [ -n "$discord_tcp_block" ]; then
         add_hostlist_line "${extra_strats_dir}/TCP_Discord.txt" "$discord_tcp_block"
     fi

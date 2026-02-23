@@ -1027,7 +1027,7 @@ step_download_domain_lists() {
         return 1
     }
 
-    # ���. ��������: ������ QUIC YT (zapret4rocket)
+    # Доп. проверка: список QUIC YT (zapret4rocket)
     local yt_quic_list="/opt/zapret2/extra_strats/UDP/YT/List.txt"
     if [ ! -s "$yt_quic_list" ]; then
         print_warning "QUIC YT list not found after local snapshot copy: $yt_quic_list"
@@ -1228,21 +1228,21 @@ step_create_config_and_init() {
     # 8.2: Установить новый init скрипт
     # ========================================================================
 
-    print_info "��������� init �������..."
+    print_info "Установка init скрипта..."
 
-    # ������� ���������� ���� �� ����������
+    # Создать директорию если не существует
     mkdir -p "$(dirname "$INIT_SCRIPT")"
 
-    # ����������� init ������ �� �����������
-    print_info "�������� init �������..."
+    # Скопировать init скрипт из дистрибутива
+    print_info "Копирование init скрипта..."
 
     if [ -f "${WORK_DIR}/files/S99zapret2.new" ]; then
         cp -f "${WORK_DIR}/files/S99zapret2.new" "$INIT_SCRIPT" || {
-            print_error "�� ������� ����������� init ������"
+            print_error "Не удалось скопировать init скрипт"
             return 1
         }
     else
-        print_error "Init ������ �� ������: ${WORK_DIR}/files/S99zapret2.new"
+        print_error "Init скрипт не найден: ${WORK_DIR}/files/S99zapret2.new"
         return 1
     fi
 
