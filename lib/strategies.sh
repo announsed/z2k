@@ -2204,7 +2204,7 @@ apply_autocircular_strategies() {
     local rkn=1
     local quic
     quic=$(get_quic_strategy_num_by_name "yt_quic_autocircular")
-    [ -z "$quic" ] && quic=1
+    [ -z "$quic" ] && quic=2
 
     print_header "Применение autocircular стратегий"
     print_info "Будут применены следующие стратегии:"
