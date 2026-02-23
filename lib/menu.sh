@@ -778,7 +778,7 @@ menu_autotest() {
             clear_screen
             print_info "RuTracker blockcheck modern: тест наших manual_* modern техник через blockcheck2 custom (rutracker.org)"
             if confirm "Запустить RuTracker blockcheck modern?" "Y"; then
-                run_blockcheck_modern "cloudflare.com rutracker.org lostfilm.tv"
+                run_blockcheck_modern "rutracker.org"
             fi
             ;;
         [Bb])
