@@ -7,8 +7,6 @@
 # КОНСТАНТЫ ДЛЯ СТРАТЕГИЙ
 # ==============================================================================
 
-TOP20_STRATEGIES="1 7 13 19 25 31 37 43 49 55 61 67 73 79 85 91 97 103 109 115"
-
 # Домены для тестирования стратегий
 TEST_DOMAINS="
 http://rutracker.org
@@ -465,7 +463,6 @@ apply_strategy() {
     save_strategy_to_category "YT_GV" "TCP" "$tcp_params" || return 1
     save_strategy_to_category "RKN" "TCP" "$tcp_params" || return 1
     save_strategy_to_category "YT" "UDP" "$udp_params" || return 1
-    save_strategy_to_category "RUTRACKER" "UDP" "$udp_params" || return 1
 
     # Обновить config файл (NFQWS2_OPT секцию)
     print_info "Обновление config файла..."
@@ -2132,7 +2129,6 @@ apply_category_strategies_v2() {
     save_strategy_to_category "YT_GV" "TCP" "$yt_gv_full" || return 1
     save_strategy_to_category "RKN" "TCP" "$rkn_full" || return 1
     save_strategy_to_category "YT" "UDP" "$udp_quic" || return 1
-    save_strategy_to_category "RUTRACKER" "UDP" "$udp_quic" || return 1
 
     # Обновить config файл (NFQWS2_OPT секцию)
     print_info "Обновление config файла..."
@@ -2208,7 +2204,7 @@ apply_autocircular_strategies() {
     local rkn=1
     local quic
     quic=$(get_quic_strategy_num_by_name "yt_quic_autocircular")
-    [ -z "$quic" ] && quic=2
+    [ -z "$quic" ] && quic=1
 
     print_header "Применение autocircular стратегий"
     print_info "Будут применены следующие стратегии:"

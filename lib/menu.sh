@@ -334,27 +334,6 @@ test_category_availability_rkn() {
     fi
 }
 
-# Применить текущие стратегии категорий (YouTube TCP/GV/RKN)
-apply_current_category_strategies() {
-    local config_file="${CONFIG_DIR}/category_strategies.conf"
-    local current_yt_tcp="1"
-    local current_yt_gv="1"
-    local current_rkn="1"
-
-    if [ -f "$config_file" ]; then
-        current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        [ -z "$current_yt_tcp" ] && current_yt_tcp="1"
-        [ -z "$current_yt_gv" ] && current_yt_gv="1"
-        [ -z "$current_rkn" ] && current_rkn="1"
-    fi
-
-    print_info "Применяю текущие стратегии категорий..."
-    apply_category_strategies_v2 "$current_yt_tcp" "$current_yt_gv" "$current_rkn"
-}
-
-
 # ==============================================================================
 # ПОДМЕНЮ: АВТОТЕСТ
 # ==============================================================================
