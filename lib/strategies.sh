@@ -116,7 +116,15 @@ EOF
     # ВАЖНО: разделитель " : " (пробел-двоеточие-пробел), а НЕ ":", т.к. параметры содержат двоеточия!
     tail -n +2 "$input_file" | while read -r line; do
         # Пропустить пустые строки
-        [ -z "$line" ] && continue
+        # Normalize CRLF
+        line=$(printf '%s' "$line" | sed 's/\r$//')
+
+        # Skip empty lines and comments
+        echo "$line" | grep -q '^[[:space:]]*$' && continue
+        echo "$line" | grep -q '^[[:space:]]*#' && continue
+
+        # Accept only real strategy lines
+        echo "$line" | grep -q ' : nfqws2\([[:space:]]\|$\)' || continue
 
         # Разделить по " : " используя awk
         local test_cmd
