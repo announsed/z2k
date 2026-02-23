@@ -362,10 +362,10 @@ generate_nfqws2_opt_from_strategies() {
         fi
     }
 
-    # RKN TCP (with Discord hostlist-exclude)
-    local rkn_exclude="--hostlist-exclude=${lists_dir}/whitelist.txt"
-    [ -s "${extra_strats_dir}/TCP_Discord.txt" ] && rkn_exclude="$rkn_exclude --hostlist-exclude=${extra_strats_dir}/TCP_Discord.txt"
-    add_hostlist_line "${extra_strats_dir}/TCP/RKN/List.txt" "$rkn_exclude --hostlist=${extra_strats_dir}/TCP/RKN/List.txt $rkn_tcp --new"
+    # RKN TCP (include Discord hostlist into RKN profile)
+    local rkn_hostlists="--hostlist=${extra_strats_dir}/TCP/RKN/List.txt"
+    [ -s "${extra_strats_dir}/TCP_Discord.txt" ] && rkn_hostlists="$rkn_hostlists --hostlist=${extra_strats_dir}/TCP_Discord.txt"
+    add_hostlist_line "${extra_strats_dir}/TCP/RKN/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt $rkn_hostlists $rkn_tcp --new"
 
     # YouTube TCP
     add_hostlist_line "${extra_strats_dir}/TCP/YT/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/TCP/YT/List.txt $youtube_tcp_tcp --new"
