@@ -291,17 +291,6 @@ generate_nfqws2_opt_from_strategies() {
 
     discord_tcp_block=$(ensure_tcp_gap_primitives "$discord_tcp_block")
 
-    local enable_wssize_value="${ENABLE_WSSIZE:-0}"
-    if [ "$enable_wssize_value" = "1" ]; then
-        # Append --wssize 1:6 to the filter list for each TCP profile
-        rkn_tcp=$(echo "$rkn_tcp" | sed 's/--filter-tcp=[^ ]*/& --wssize 1:6/')
-        youtube_tcp_tcp=$(echo "$youtube_tcp_tcp" | sed 's/--filter-tcp=[^ ]*/& --wssize 1:6/')
-        youtube_gv_tcp=$(echo "$youtube_gv_tcp" | sed 's/--filter-tcp=[^ ]*/& --wssize 1:6/')
-        if [ -n "$discord_tcp_block" ]; then
-            discord_tcp_block=$(echo "$discord_tcp_block" | sed 's/--filter-tcp=[^ ]*/& --wssize 1:6/')
-        fi
-    fi
-
     # Генерировать NFQWS2_OPT в формате официального config
     local nfqws2_opt_lines=""
 
@@ -546,11 +535,6 @@ CONFIG
     echo "" >> "$config_file"
     echo "# Disable IPv6 processing (0=enabled, 1=disabled)" >> "$config_file"
     echo "DISABLE_IPV6=$disable_ipv6_value" >> "$config_file"
-
-    local enable_wssize_value="${ENABLE_WSSIZE:-0}"
-    echo "" >> "$config_file"
-    echo "# TCP Window Size Spoofing (0=disabled, 1=enabled)" >> "$config_file"
-    echo "ENABLE_WSSIZE=$enable_wssize_value" >> "$config_file"
 
     cat >> "$config_file" <<'CONFIG'
 
