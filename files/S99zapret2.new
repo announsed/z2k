@@ -1,38 +1,38 @@
 #!/bin/sh
 # /opt/etc/init.d/S99zapret2
-#   init.d/openwrt/zapret2  Keenetic
-#   common/  config   hardcoded 
+# ��������� ������������ init.d/openwrt/zapret2 ��� Keenetic
+# ���������� ������ common/ � config ���� ������ hardcoded ��������
 
 # ==============================================================================
-#   
+# ���� � ����������
 # ==============================================================================
 
 ZAPRET_BASE=/opt/zapret2
 ZAPRET_RW=${ZAPRET_RW:-"$ZAPRET_BASE"}
 ZAPRET_CONFIG=${ZAPRET_CONFIG:-"$ZAPRET_RW/config"}
 
-#   zapret2 
+# �������� ��� zapret2 ����������
 [ -d "$ZAPRET_BASE" ] || {
     echo "ERROR: zapret2 not installed in $ZAPRET_BASE"
     exit 1
 }
 
 # ==============================================================================
-# SOURCE   (  init.d/openwrt/functions)
+# SOURCE ����������� ������� (��� � init.d/openwrt/functions)
 # ==============================================================================
 
-#  
+# ������� �������
 . "$ZAPRET_BASE/common/base.sh"
 
-#   firewall (iptables/nftables)
+# ����������� ���� firewall (iptables/nftables)
 . "$ZAPRET_BASE/common/fwtype.sh"
 
-# KEENETIC FIX:  linux_ipt_avail    ip6tables
-#  Keenetic   DISABLE_IPV6=1,  iptables   
+# KEENETIC FIX: �������������� linux_ipt_avail ��� ������ ��� ip6tables
+# �� Keenetic ����� ���� DISABLE_IPV6=1, �� iptables ��� ����� ��������
 linux_ipt_avail()
 {
-	#  Keenetic   iptables (IPv4-only )
-	[ -n "$Z2K_DEBUG" ] && echo "DEBUG: linux_ipt_avail() "
+	# ��� Keenetic ���������� ������ iptables (IPv4-only �����)
+	[ -n "$Z2K_DEBUG" ] && echo "DEBUG: linux_ipt_avail() �������"
 	exists iptables
 	local result=$?
 	[ -n "$Z2K_DEBUG" ] && echo "DEBUG: exists iptables = $result"
@@ -42,45 +42,45 @@ linux_ipt_avail()
 # IP helper functions
 . "$ZAPRET_BASE/common/linux_iphelper.sh"
 
-#     iptables
+# ������� ��� ������ � iptables
 . "$ZAPRET_BASE/common/ipt.sh"
 
-#     nftables ( )
+# ������� ��� ������ � nftables (���� ��������)
 existf zapret_do_firewall_nft || . "$ZAPRET_BASE/common/nft.sh" 2>/dev/null
 
-#  firewall
+# ���������� firewall
 . "$ZAPRET_BASE/common/linux_fw.sh"
 
-#  daemon 
+# ���������� daemon ����������
 . "$ZAPRET_BASE/common/linux_daemons.sh"
 
-#    
+# ������ �� �������� �������
 . "$ZAPRET_BASE/common/list.sh"
 
-#  custom scripts
+# ��������� custom scripts
 . "$ZAPRET_BASE/common/custom.sh"
 
 # ==============================================================================
-#  
+# �������� ������������
 # ==============================================================================
 
-#  
+# ��������� ������������
 . "$ZAPRET_CONFIG"
 
-# DEBUG:  FWTYPE   config
-[ -n "$Z2K_DEBUG" ] && echo "DEBUG:   config - FWTYPE='$FWTYPE'"
+# DEBUG: ��������� FWTYPE ����� �������� config
+[ -n "$Z2K_DEBUG" ] && echo "DEBUG: ����� �������� config - FWTYPE='$FWTYPE'"
 
-# :     iptables ( -  :)
-# std_ports()     ipt.sh,     
-#   std_ports()   config
+# ��������: ������������� ����� � ������ iptables (�������� - �� :)
+# std_ports() ���� ������� ��� �������� ipt.sh, �� ����� ���������� ���� ������
+# �������� ������� std_ports() ����� �������� config
 command -v std_ports >/dev/null 2>&1 && std_ports
-[ -n "$Z2K_DEBUG" ] && echo "DEBUG: std_ports()  - NFQWS2_PORTS_TCP_IPT='$NFQWS2_PORTS_TCP_IPT'"
+[ -n "$Z2K_DEBUG" ] && echo "DEBUG: std_ports() ������� - NFQWS2_PORTS_TCP_IPT='$NFQWS2_PORTS_TCP_IPT'"
 
 # ------------------------------------------------------------------------------
-#    ORCHESTRATION (STRICT MANUAL MODE)
+# �������� ������ ��� ORCHESTRATION (STRICT MANUAL MODE)
 # ------------------------------------------------------------------------------
-#     (, circular)  
-#  RST/redirect  ..      .
+# ��� ���������� ������ ������������� (��������, circular) ��������� ������
+# �������� RST/redirect � �.�. ������� �������� �������� ������� �� ���������.
 [ -z "$NFQWS2_TCP_PKT_IN" ] && NFQWS2_TCP_PKT_IN="$NFQWS2_TCP_PKT_OUT"
 [ -z "$NFQWS2_UDP_PKT_IN" ] && NFQWS2_UDP_PKT_IN="$NFQWS2_UDP_PKT_OUT"
 
@@ -394,7 +394,7 @@ traffic_debug_tcpdump_stop()
 	rm -f "$pidfile" 2>/dev/null || true
 }
 # ==============================================================================
-#    KEENETIC
+# ��������� ����������� ��� KEENETIC
 # ==============================================================================
 
 PIDDIR=/var/run
@@ -471,7 +471,7 @@ ORCH_SCRIPT="$EXTRA_STRATS_DIR/cache/orchestra/orchestrator.sh"
 IPSET_CR="$ZAPRET_BASE/ipset/create_ipset.sh"
 
 # ==============================================================================
-#     IPSET
+# ������� ��� ������ � IPSET
 # ==============================================================================
 
 create_ipset()
@@ -481,7 +481,7 @@ create_ipset()
 }
 
 # ==============================================================================
-# KEENETIC FIREWALL FUNCTIONS ( OpenWrt network.sh )
+# KEENETIC FIREWALL FUNCTIONS (������ OpenWrt network.sh ������������)
 # ==============================================================================
 
 get_default_ifaces4()
@@ -532,9 +532,9 @@ get_wan_ifaces6()
 	[ -n "$ifaces" ] && unique $ifaces || true
 }
 
-# Keenetic-specific:   fw_nfqws_post4/post6/pre4/pre6
-#    OpenWrt,   network.sh   WAN 
-#   WAN  default route
+# Keenetic-specific: ���������� ������ fw_nfqws_post4/post6/pre4/pre6
+# � ������� �� OpenWrt, �� ������� network.sh � ����������� WAN �����������
+# �������� ���������� WAN �� default route
 
 fw_nfqws_post4()
 {
@@ -599,7 +599,7 @@ fw_nfqws_pre6()
 }
 
 # ==============================================================================
-#   DAEMON (  KEENETIC  PROCD)
+# ������� ���������� DAEMON (������������ ��� KEENETIC ��� PROCD)
 # ==============================================================================
 
 run_daemon()
@@ -612,14 +612,14 @@ run_daemon()
 
     echo "Starting daemon $1: $2 $3"
 
-    #      PID
+    # ������ � ���� � ����������� PID
     $2 $3 >/dev/null 2>&1 &
     local PID=$!
 
-    #  PID
+    # ��������� PID
     echo $PID > "$PIDFILE"
 
-    #    
+    # ��������� ��� ������� ����������
     sleep 1
     if kill -0 $PID 2>/dev/null; then
         echo "Daemon $1 started with PID $PID"
@@ -635,7 +635,7 @@ run_nfqws()
 {
     # $1 - instance ID
     # $2 - nfqws options
-    # No hostlist validation here  custom.d scripts (50-stun4all, 50-discord-media)
+    # No hostlist validation here — custom.d scripts (50-stun4all, 50-discord-media)
     # intentionally run without hostlists, relying on firewall rules (u32/nft @ih).
     # Hostlist checks happen at config generation time (add_hostlist_line in config_official.sh).
     run_daemon $1 "$NFQWS2" "$NFQWS2_OPT_BASE $2"
@@ -658,7 +658,7 @@ stop_daemon_by_pidfile()
             echo "Stopping daemon with PID $PID"
             kill $PID 2>/dev/null
             sleep 1
-            # Force kill   
+            # Force kill ���� �� �����������
             kill -0 $PID 2>/dev/null && kill -9 $PID 2>/dev/null
         fi
         rm -f "$1"
@@ -669,31 +669,31 @@ stop_all_nfqws()
 {
     echo "Stopping all nfqws daemons"
 
-    #   PID 
+    # ���������� �� PID ������
     for pidfile in $PIDDIR/nfqws2_*.pid; do
         [ -f "$pidfile" ] && stop_daemon_by_pidfile "$pidfile"
     done
 
-    # Fallback: killall  - 
+    # Fallback: killall ���� ���-�� ��������
     killall nfqws2 2>/dev/null
 
-    #   PID 
+    # �������� ��� PID �����
     rm -f $PIDDIR/nfqws2_*.pid 2>/dev/null
 }
 
 # ==============================================================================
-#  START/STOP DAEMONS
+# ������� START/STOP DAEMONS
 # ==============================================================================
 
 start_daemons()
 {
     echo "Starting zapret2 daemons"
 
-    #    common/linux_daemons.sh
-    # standard_mode_daemons  do_nfqws
+    # ������������ ������� �� common/linux_daemons.sh
+    # standard_mode_daemons �������� do_nfqws
     standard_mode_daemons 1
 
-    #  custom scripts  
+    # ��������� custom scripts ���� ����
     custom_runner zapret_custom_daemons 1
 
     return 0
@@ -703,10 +703,10 @@ stop_daemons()
 {
     echo "Stopping zapret2 daemons"
 
-    #   nfqws 
+    # ���������� ��� nfqws ��������
     stop_all_nfqws
 
-    #  custom scripts  
+    # ��������� custom scripts ��� ���������
     custom_runner zapret_custom_daemons 0
 
     return 0
@@ -720,14 +720,14 @@ restart_daemons()
 }
 
 # ==============================================================================
-#  START/STOP FIREWALL
+# ������� START/STOP FIREWALL
 # ==============================================================================
 
 load_modules()
 {
     echo "Loading required kernel modules"
 
-    #      zapret2
+    # ������ ����������� ������� ��� ������ zapret2
     # Add connmark modules for Keenetic policy integration (nfqws2-keenetic style).
     local modules="xt_multiport xt_connbytes xt_NFQUEUE nfnetlink_queue xt_CONNMARK xt_connmark"
 
@@ -742,7 +742,7 @@ load_modules()
         fi
     done
 
-    #    nfnetlink_queue
+    # ��������� ��������� ������ nfnetlink_queue
     if ! lsmod | grep -q "nfnetlink_queue" && ! modinfo nfnetlink_queue >/dev/null 2>&1; then
         echo "WARNING: nfnetlink_queue module not available!"
         echo "nfqws2 may fail with 'Operation not permitted'"
@@ -1080,18 +1080,18 @@ start_fw()
 {
     echo "Applying zapret2 firewall rules"
 
-    # DEBUG:  FWTYPE  linux_fwtype
-    [ -n "$Z2K_DEBUG" ] && echo "DEBUG:  start_fw()  linux_fwtype - FWTYPE='$FWTYPE'"
+    # DEBUG: ��������� FWTYPE ����� linux_fwtype
+    [ -n "$Z2K_DEBUG" ] && echo "DEBUG: � start_fw() ����� linux_fwtype - FWTYPE='$FWTYPE'"
 
-    #   firewall (iptables/nftables)
+    # ���������� ��� firewall (iptables/nftables)
     linux_fwtype
 
-    # DEBUG:  FWTYPE  linux_fwtype
-    [ -n "$Z2K_DEBUG" ] && echo "DEBUG:  start_fw()  linux_fwtype - FWTYPE='$FWTYPE'"
+    # DEBUG: ��������� FWTYPE ����� linux_fwtype
+    [ -n "$Z2K_DEBUG" ] && echo "DEBUG: � start_fw() ����� linux_fwtype - FWTYPE='$FWTYPE'"
 
     echo "Detected firewall type: $FWTYPE"
 
-    #     common/linux_fw.sh
+    # ������������ ����������� ������� �� common/linux_fw.sh
     z2k_connmark_init
     zapret_apply_firewall
     z2k_policy_connmark_start
@@ -1104,10 +1104,10 @@ stop_fw()
 {
     echo "Removing zapret2 firewall rules"
 
-    #   firewall
+    # ���������� ��� firewall
     linux_fwtype
 
-    #   
+    # ������������ ����������� �������
     z2k_connmark_init
     z2k_udp_masquerade_fix_stop
     z2k_policy_connmark_stop
@@ -1155,7 +1155,7 @@ list_table()
 }
 
 # ==============================================================================
-#   START/STOP/RESTART
+# �������� ������� START/STOP/RESTART
 # ==============================================================================
 
 start()
@@ -1167,17 +1167,17 @@ start()
 
     echo "Starting zapret2 service"
 
-    # 1.    
+    # 1. ��������� ����������� ������ ����
     load_modules || echo "Warning: Some modules failed to load"
 
-    # 2.  firewall 
+    # 2. ��������� firewall �������
     [ "$INIT_APPLY_FW" = "1" ] && start_fw
 
-    # 2.1.  autohostlist  ( )
+    # 2.1. ����������� autohostlist ����� (���� ��������)
     ensure_autohostlist_files
     sync_autohostlist_to_rkn
 
-    # 2.2.  autocircular cache/debug files (writable by runtime user)
+    # 2.2. ����������� autocircular cache/debug files (writable by runtime user)
     ensure_autocircular_files
 
     # traffic debug (optional): nfqws2 debug log + tcpdump pcap capture
@@ -1186,10 +1186,10 @@ start()
     traffic_debug_enable_nfqws2_log
     traffic_debug_tcpdump_start
 
-    # 3.  daemon 
+    # 3. ��������� daemon ��������
     start_daemons
 
-    # 4.  orchestrator (circular_locked rotation)
+    # 4. ��������� orchestrator (circular_locked rotation)
     [ -x "$ORCH_SCRIPT" ] && "$ORCH_SCRIPT" start
 
     echo "zapret2 service started"
@@ -1201,16 +1201,16 @@ stop()
     echo "Stopping zapret2 service"
 
     traffic_debug_tcpdump_stop
-    # 0.  orchestrator
+    # 0. ���������� orchestrator
     [ -x "$ORCH_SCRIPT" ] && "$ORCH_SCRIPT" stop
 
-    # 1.  daemon 
+    # 1. ���������� daemon ��������
     stop_daemons
 
     # Sync auto-detected domains after runtime updates.
     sync_autohostlist_to_rkn
 
-    # 2.  firewall 
+    # 2. ������� firewall �������
     [ "$INIT_APPLY_FW" = "1" ] && stop_fw
 
     echo "zapret2 service stopped"
@@ -1228,7 +1228,7 @@ status()
 {
     echo "Checking zapret2 status..."
 
-    #    PID 
+    # ��������� �������� �� PID ������
     local running=0
     for pidfile in $PIDDIR/nfqws2_*.pid; do
         if [ -f "$pidfile" ]; then
@@ -1245,7 +1245,7 @@ status()
     if [ $running -gt 0 ]; then
         echo "zapret2 is running ($running daemons)"
 
-        #  
+        # �������� ��������
         echo "Processes:"
         pgrep -af nfqws2
 
