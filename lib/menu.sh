@@ -66,11 +66,12 @@ MENU
 [A] Режим ALL TCP-443 (без хостлистов)
 [Q] Настройки QUIC
 [W] Whitelist (исключения)
+[E] Экспериментальные функции (wssize)
 [0] Выход
 
 MENU
 
-        printf "Выберите опцию [0-7,A,Q,W]: "
+        printf "Выберите опцию [0-7,A,Q,W,E]: "
         read_input choice
 
         case "$choice" in
@@ -103,6 +104,9 @@ MENU
                 ;;
             w|W)
                 menu_whitelist
+                ;;
+            e|E)
+                menu_experimental_settings
                 ;;
             0)
                 print_info "Выход из меню"
@@ -1025,6 +1029,70 @@ menu_select_quic_strategy_youtube() {
     pause
 }
 
+# ==============================================================================
+# ПОДМЕНЮ: ЭКСПЕРИМЕНТАЛЬНЫЕ НАСТРОЙКИ
+# ==============================================================================
+
+menu_experimental_settings() {
+    clear_screen
+    print_header "Экспериментальные функции"
+
+    local config_file="/opt/zapret2/config"
+    local current_wssize="0"
+    if [ -f "$config_file" ]; then
+        # Чтение текущего состояния из конфига
+        current_wssize=$(grep -E "^ENABLE_WSSIZE=" "$config_file" | cut -d'=' -f2 | tr -d '"')
+        [ -z "$current_wssize" ] && current_wssize="0"
+    fi
+
+    printf "\nТекущие настройки:\n"
+    if [ "$current_wssize" = "1" ]; then
+        printf "  TCP Window Size Spoofing (--wssize 1:6): [ВКЛЮЧЕНО]\n"
+    else
+        printf "  TCP Window Size Spoofing (--wssize 1:6): [ОТКЛЮЧЕНО]\n"
+    fi
+
+    cat <<'MENU'
+
+[1] Включить/Отключить TCP Window Size Spoofing
+[B] Назад
+
+MENU
+
+    printf "Выберите опцию: "
+    read_input choice
+
+    case "$choice" in
+        1)
+            local new_val="1"
+            [ "$current_wssize" = "1" ] && new_val="0"
+            
+            # Сохраняем остальные настройки через export
+            [ -f "$config_file" ] && . "$config_file"
+            export ENABLE_WSSIZE="$new_val"
+            
+            print_info "Регенерация конфигурации nfqws2..."
+            if command -v create_official_config >/dev/null; then
+                create_official_config "$config_file"
+            fi
+            
+            if is_zapret2_running; then
+                "$INIT_SCRIPT" restart
+                print_success "Сервис перезапущен с новыми параметрами"
+            else
+                print_success "Настройки сохранены"
+            fi
+            pause
+            ;;
+        b|B)
+            return 0
+            ;;
+        *)
+            print_error "Неверный выбор: $choice"
+            pause
+            ;;
+    esac
+}
 
 # ==============================================================================
 # ЭКСПОРТ ФУНКЦИЙ
