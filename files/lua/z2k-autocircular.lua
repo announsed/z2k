@@ -797,10 +797,18 @@ if type(circular) == "function" then
         (desync and desync.l7payload == "quic_initial") and
         (not failure_after) and
         n_after and n_after > 1
+      -- TCP strategies use --payload=tls_client_hello, so circular() is only called for outgoing
+      -- ClientHello packets. success_detector (inseq/maxseq) never fires because incoming data
+      -- packets never reach circular(). Persist on every outgoing initial packet instead:
+      -- write_state() is rate-limited (2s) and persist_if_changed() skips redundant writes.
+      local outgoing_initial = desync and desync.outgoing and n_after and
+        (desync.l7payload == "tls_client_hello" or
+         desync.l7payload == "quic_initial" or
+         desync.l7payload == "http_req")
       local success_event = successful_state or response_state or quic_candidate_state
       local failure_event = failure_after and (not success_event)
       local persisted = false
-      if success_event then
+      if success_event or outgoing_initial then
         persisted = persist_if_changed(askey, hostn, hrec)
       end
 
@@ -817,7 +825,7 @@ if type(circular) == "function" then
         write_state()
       end
 
-      local debug_event = persisted or failure_after or success_event or failure_event or (policy_pick_before ~= nil)
+      local debug_event = persisted or failure_after or success_event or failure_event or outgoing_initial or (policy_pick_before ~= nil)
       if debug_event and (should_debug_key(askey_before) or should_debug_key(askey_after)) then
         local track = desync and desync.track
         local hn = track and track.hostname or ""
@@ -837,6 +845,7 @@ if type(circular) == "function" then
           " success_state=" .. tostring(successful_state and 1 or 0) ..
           " response_state=" .. tostring(response_state and 1 or 0) ..
           " quic_candidate_state=" .. tostring(quic_candidate_state and 1 or 0) ..
+          " outgoing_initial=" .. tostring(outgoing_initial and 1 or 0) ..
           " success_event=" .. tostring(success_event and 1 or 0) ..
           " failure_event=" .. tostring(failure_event and 1 or 0) ..
           " latency_s=" .. tostring(latency_s or "") ..
