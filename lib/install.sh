@@ -795,7 +795,7 @@ step_build_zapret2() {
 
     print_info "Установка custom.d скриптов для STUN/Discord media..."
 
-    local custom_dir="${ZAPRET2_DIR}/init.d/keenetic"
+    local custom_dir="${ZAPRET2_DIR}/init.d/keenetic/custom.d"
     mkdir -p "$custom_dir"
 
     if curl -fsSL "https://raw.githubusercontent.com/bol-van/zapret2/master/init.d/custom.d.examples.linux/50-stun4all" \
@@ -812,6 +812,15 @@ step_build_zapret2() {
         print_success "50-discord-media установлен"
     else
         print_warning "Не удалось загрузить 50-discord-media"
+    fi
+
+    # Telegram MTProto: IP-based desync for Telegram DC ranges (catches non-TLS MTProto)
+    if [ -f "${WORK_DIR}/files/custom.d/50-telegram-mtproto" ]; then
+        cp -f "${WORK_DIR}/files/custom.d/50-telegram-mtproto" "${custom_dir}/50-telegram-mtproto"
+        chmod +x "${custom_dir}/50-telegram-mtproto"
+        print_success "50-telegram-mtproto установлен"
+    else
+        print_warning "50-telegram-mtproto не найден в файлах проекта"
     fi
 
     # ===========================================================================
