@@ -328,9 +328,9 @@ generate_nfqws2_opt_from_strategies() {
     nfqws2_opt_lines="$nfqws2_opt_lines$discord_udp --new\\n"
 
     # HTTP RKN (port 80): bypass ISP DPI redirect for plain HTTP blocked sites.
-    # Uses --dpi-desync= engine (not Lua circular) — HTTP blocking is uniform across ISPs.
-    # Strategy: fake HTTP request + multisplit at Host header boundary + md5sig fooling.
-    add_hostlist_line "${extra_strats_dir}/TCP/RKN/List.txt" "--filter-tcp=80 --hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/TCP/RKN/List.txt --dpi-desync=fake,multisplit --dpi-desync-split-seqovl=2 --dpi-desync-split-pos=host+1 --dpi-desync-fake-http=/opt/zapret2/files/fake/http_iana_org.bin --dpi-desync-fooling=md5sig --new"
+    # Strategy: fake HTTP request (http_iana_org.bin) + multisplit at Host header + md5sig fooling.
+    # Uses --lua-desync= (nfqws2 API), not --dpi-desync= (nfqws v1).
+    add_hostlist_line "${extra_strats_dir}/TCP/RKN/List.txt" "--filter-tcp=80 --payload=http_req --hostlist-exclude=${lists_dir}/whitelist.txt --hostlist=${extra_strats_dir}/TCP/RKN/List.txt --lua-desync=fake:payload=http_req:dir=out:blob=http_iana:fooling=md5sig --lua-desync=multisplit:payload=http_req:dir=out:pos=host+1:seqovl=2:fooling=md5sig --new"
 
     # Catch-all TCP profile for autohostlist failure tracking
     # Upstream zapret appends --hostlist-auto to the very end of NFQWS2_OPT, 
