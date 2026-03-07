@@ -771,24 +771,154 @@ menu_whitelist() {
         # Создать базовый whitelist
         cat > "$whitelist_file" <<'EOF'
 # Whitelist - домены исключенные из обработки zapret2
-# Критичные государственные сервисы РФ
+# Сервисы, которые могут работать некорректно с DPI bypass
 
-# Госуслуги (ЕСИА)
+# === Госуслуги РФ ===
 gosuslugi.ru
 esia.gosuslugi.ru
 lk.gosuslugi.ru
-
-# Налоговая служба
+nalog.ru
 nalog.gov.ru
 lkfl2.nalog.ru
-
-# Пенсионный фонд
 pfr.gov.ru
 es.pfr.gov.ru
-
-# Другие важные госсервисы
 mos.ru
-pgu.mos.ru
+mos-gorsud.ru
+gov.ru
+sudrf.ru
+
+# === Российские сервисы ===
+vk.com
+vk.ru
+vkvideo.ru
+rutube.ru
+yandex.ru
+ya.ru
+kinopoisk.ru
+okko.tv
+avito.ru
+beeline.ru
+beeline.tv
+ottai.com
+ipstream.one
+vkusvill.ru
+
+# === Steam ===
+s.team
+steam.tv
+steamcdn.com
+steamchat.com
+steam-chat.com
+steamgames.com
+steamserver.net
+steamstatic.com
+steampowered.com
+steamcontent.com
+steamcommunity.com
+steambroadcast.com
+steamdeckcdn.com
+steamdeckusercontent.com
+steamuserimages-a.akamaihd.net
+steamcdn-a.akamaihd.net
+steampipe.akamaized.net
+steamcdn-a.akamaized.net
+steamstatic.akamaized.net
+steamcommunity.akamaized.net
+steamcommunity-a.akamaihd.net
+steamcloudsweden.blob.core.windows.net
+valve.net
+valvecdn.com
+valvecontent.com
+valvesoftware.com
+
+# === Epic Games ===
+epicgames.com
+epicgames.dev
+epicgamescdn.com
+unrealengine.com
+easyanticheat.net
+eac-cdn.com
+fortnite.com
+fab.com
+artstation.com
+
+# === Ubisoft ===
+ubi.com
+ubisoft.com
+ubisoftconnect.com
+
+# === PlayStation / Sony ===
+playstation.net
+playstation.com
+account.sony.com
+psremoteplay.com
+playstationcloud.com
+sonyentertainmentnetwork.com
+
+# === Twitch ===
+twitch.tv
+ttvnw.net
+jtvnw.net
+twitchcdn.net
+ext-twitch.tv
+twitchsvc.net
+live-video.net
+twitch-shadow.net
+
+# === Riot Games / Valorant ===
+riotgames.com
+riotcdn.net
+valorant.com
+playvalorant.com
+pvp.net
+vivox.com
+sd-rtn.com
+
+# === HoYoverse (Genshin, HSR) ===
+hoyoverse.com
+hoyolab.com
+hoyo.link
+yuanshen.com
+genshinimpact.com
+zenlesszonezero.com
+
+# === AliExpress ===
+aliexpress.com
+aliexpress.ru
+aliexpress.us
+alicdn.com
+ae.com
+
+# === TikTok ===
+tiktok.com
+tiktokcdn.com
+tiktokv.com
+muscdn.com
+byteoversea.com
+ibytedtos.com
+ttwstatic.com
+
+# === Samsung ===
+samsungosp.com
+samsungqbe.com
+samsungcloudsolution.com
+
+# === Стриминг ===
+netflix.com
+vsetop.org
+
+# === Google API ===
+jnn-pa.googleapis.com
+ogs.google.com
+gstatic.com
+
+# === Мониторинг и CDN ===
+datadoghq.com
+okcdn.ru
+api.mycdn.me
+
+# === Разработка ===
+raw.githubusercontent.com
 EOF
 
         if [ ! -f "$whitelist_file" ]; then
@@ -810,10 +940,11 @@ Whitelist содержит домены, которые ИСКЛЮЧЕНЫ из 
 при применении DPI-обхода (госуслуги, банки, и т.д.)
 
 По умолчанию в whitelist включены:
-  - gosuslugi.ru (Госуслуги, ЕСИА)
-  - nalog.gov.ru (Налоговая служба)
-  - pfr.gov.ru (Пенсионный фонд)
-  - mos.ru (Москва)
+  - Госуслуги РФ (gosuslugi, nalog, pfr, mos, gov.ru...)
+  - Российские сервисы (VK, Yandex, Rutube, Avito, Beeline...)
+  - Steam, Epic Games, Ubisoft, PlayStation
+  - Twitch, Riot/Valorant, HoYoverse, TikTok
+  - AliExpress, Samsung, Netflix
 
 [1] Просмотреть whitelist
 [2] Редактировать whitelist (vi)

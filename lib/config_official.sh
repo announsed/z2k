@@ -579,6 +579,10 @@ AUTOHOSTLIST_DEBUGLOG=0
 # Directory for custom scripts
 CUSTOM_DIR="/opt/zapret2/init.d/keenetic"
 
+# Disable custom.d scripts (50-stun4all, 50-discord-media).
+# Discord voice/video is handled by nfqws2 strategies (profile 6), no extra daemons needed.
+DISABLE_CUSTOM=1
+
 # ==============================================================================
 # MISCELLANEOUS
 # ==============================================================================

@@ -500,46 +500,151 @@ EOF
 # Whitelist - домены исключенные из обработки zapret2
 # Сервисы, которые могут работать некорректно с DPI bypass
 
-# Социальные сети и медиа
-pinterest.com
-vkvideo.ru
+# === Госуслуги РФ ===
+gosuslugi.ru
+esia.gosuslugi.ru
+lk.gosuslugi.ru
+nalog.ru
+nalog.gov.ru
+lkfl2.nalog.ru
+pfr.gov.ru
+es.pfr.gov.ru
+mos.ru
+mos-gorsud.ru
+gov.ru
+sudrf.ru
+
+# === Российские сервисы ===
 vk.com
+vk.ru
+vkvideo.ru
 rutube.ru
-
-# E-commerce и объявления
+yandex.ru
+ya.ru
+kinopoisk.ru
+okko.tv
 avito.ru
+beeline.ru
+beeline.tv
+ottai.com
+ipstream.one
+vkusvill.ru
 
-# Стриминг
-netflix.com
-vsetop.org
+# === Steam ===
+s.team
+steam.tv
+steamcdn.com
+steamchat.com
+steam-chat.com
+steamgames.com
+steamserver.net
+steamstatic.com
+steampowered.com
+steamcontent.com
+steamcommunity.com
+steambroadcast.com
+steamdeckcdn.com
+steamdeckusercontent.com
+steamuserimages-a.akamaihd.net
+steamcdn-a.akamaihd.net
+steampipe.akamaized.net
+steamcdn-a.akamaized.net
+steamstatic.akamaized.net
+steamcommunity.akamaized.net
+steamcommunity-a.akamaihd.net
+steamcloudsweden.blob.core.windows.net
+valve.net
+valvecdn.com
+valvecontent.com
+valvesoftware.com
+
+# === Epic Games ===
+epicgames.com
+epicgames.dev
+epicgamescdn.com
+unrealengine.com
+easyanticheat.net
+eac-cdn.com
+fortnite.com
+fab.com
+artstation.com
+
+# === Ubisoft ===
+ubi.com
+ubisoft.com
+ubisoftconnect.com
+
+# === PlayStation / Sony ===
+playstation.net
+playstation.com
+account.sony.com
+psremoteplay.com
+playstationcloud.com
+sonyentertainmentnetwork.com
+
+# === Twitch ===
 twitch.tv
 ttvnw.net
-static-cdn.jtvnw.net
+jtvnw.net
+twitchcdn.net
+ext-twitch.tv
+twitchsvc.net
+live-video.net
+twitch-shadow.net
 
-# Google API
+# === Riot Games / Valorant ===
+riotgames.com
+riotcdn.net
+valorant.com
+playvalorant.com
+pvp.net
+vivox.com
+sd-rtn.com
+
+# === HoYoverse (Genshin, HSR) ===
+hoyoverse.com
+hoyolab.com
+hoyo.link
+yuanshen.com
+genshinimpact.com
+zenlesszonezero.com
+
+# === AliExpress ===
+aliexpress.com
+aliexpress.ru
+aliexpress.us
+alicdn.com
+ae.com
+
+# === TikTok ===
+tiktok.com
+tiktokcdn.com
+tiktokv.com
+muscdn.com
+byteoversea.com
+ibytedtos.com
+ttwstatic.com
+
+# === Samsung ===
+samsungosp.com
+samsungqbe.com
+samsungcloudsolution.com
+
+# === Стриминг ===
+netflix.com
+vsetop.org
+
+# === Google API (не ломать поиск) ===
 jnn-pa.googleapis.com
 ogs.google.com
-encrypted-tbn0.gstatic.com
-encrypted-tbn1.gstatic.com
-encrypted-tbn2.gstatic.com
-encrypted-tbn3.gstatic.com
+gstatic.com
 
-# Gaming
-steamcommunity.com
-steampowered.com
-tarkov.com
-escapefromtarkov.com
-
-# Мониторинг и CDN
-browser-intake-datadoghq.com
+# === Мониторинг и CDN ===
 datadoghq.com
 okcdn.ru
 api.mycdn.me
 
-# Госуслуги
-gosuslugi.ru
-
-# Разработка
+# === Разработка ===
 raw.githubusercontent.com
 EOF
 
