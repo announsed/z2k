@@ -48,7 +48,7 @@ MENU
             if [ -f "$all_tcp443_conf" ]; then
                 . "$all_tcp443_conf"
                 if [ "$ENABLED" = "1" ]; then
-                    printf " ALL TCP-443: Включен (стратегия #%s)\n" "$STRATEGY"
+                    printf " Режим Austerus: Включен (без хостлистов)\n"
                 fi
             fi
 
@@ -63,7 +63,7 @@ MENU
 [5] Обновить списки доменов
 [6] Резервная копия/Восстановление
 [7] Удалить zapret2
-[A] Режим ALL TCP-443 (без хостлистов)
+[A] Режим без хостлистов (для Austerus)
 [Q] Настройки QUIC
 [W] Whitelist (исключения)
 [S] Скрипты custom.d
@@ -580,16 +580,15 @@ menu_uninstall() {
 }
 
 # ==============================================================================
-# ПОДМЕНЮ: РЕЖИМ ALL TCP-443 (БЕЗ ХОСТЛИСТОВ)
+# ПОДМЕНЮ: РЕЖИМ БЕЗ ХОСТЛИСТОВ (ДЛЯ AUSTERUS)
 # ==============================================================================
 
 menu_all_tcp443() {
     clear_screen
-    print_header "Режим ALL TCP-443 (без хостлистов)"
+    print_header "Режим без хостлистов (для Austerus)"
 
     local conf_file="${CONFIG_DIR}/all_tcp443.conf"
 
-    # Проверить существование конфига
     if [ ! -f "$conf_file" ]; then
         print_error "Файл конфигурации не найден: $conf_file"
         print_info "Запустите установку сначала"
@@ -597,82 +596,46 @@ menu_all_tcp443() {
         return 1
     fi
 
-    # Прочитать текущую конфигурацию
     . "$conf_file"
     local current_enabled=$ENABLED
-    local current_strategy=$STRATEGY
 
     print_separator
 
-    print_info "Текущая конфигурация:"
-    printf "  Статус: %s\n" "$([ "$current_enabled" = "1" ] && echo 'Включен' || echo 'Выключен')"
-    printf "  Стратегия: #%s\n" "$current_strategy"
+    print_info "Статус: $([ "$current_enabled" = "1" ] && echo 'Включен' || echo 'Выключен')"
 
     print_separator
 
     cat <<'SUBMENU'
 
-ВНИМАНИЕ: Этот режим применяет стратегию ко ВСЕМУ трафику HTTPS (TCP-443)
-без фильтрации по доменам из хостлистов!
+Простые стратегии из Zapret1, без хостлистов и автоциркуляра.
+Применяются ко ВСЕМУ трафику на портах 80/443 (TCP+UDP).
 
-Использование:
-  - Для обхода блокировок ВСЕХ сайтов одной стратегией
-  - Когда хостлисты не помогают
-  - Для тестирования универсальных стратегий
+Стратегии:
+  HTTP  (TCP 80):  fake(zero_256, badsum+badseq) + multisplit
+  TLS   (TCP 443): fake(google_hello, badsum+badseq, tls_mod) + multidisorder
+  QUIC  (UDP 443): fake(zero_256)
 
-Недостатки:
-  - Может замедлить ВСЕ HTTPS соединения
-  - Увеличивает нагрузку на роутер
-  - Может вызвать проблемы с некоторыми сайтами
+При включении заменяет ВСЕ профили z2k (YT/RKN/Discord/HTTP).
+При выключении возвращаются стандартные автоциркуляры z2k.
 
-[1] Включить режим ALL TCP-443
-[2] Выключить режим ALL TCP-443
-[3] Изменить стратегию
+[1] Включить
+[2] Выключить
 [B] Назад
 
 SUBMENU
 
-    printf "Выберите опцию [1-3,B]: "
+    printf "Выберите опцию [1-2,B]: "
     read_input sub_choice
 
     case "$sub_choice" in
         1)
-            # Включить режим
-            print_info "Выбор стратегии для режима ALL TCP-443..."
-            print_separator
-
-            # Показать топ стратегий
-            print_info "Рекомендуемые стратегии для режима ALL TCP-443:"
-            printf "  #1  - multidisorder (базовая)\n"
-            printf "  #7  - multidisorder:pos=1\n"
-            printf "  #13 - multidisorder:pos=sniext+1\n"
-            printf "  #67 - fakedsplit с ip_autottl (продвинутая)\n"
-            print_separator
-
-            printf "Введите номер стратегии [1-199] или Enter для #1: "
-            read_input strategy_num
-
-            # Валидация
-            if [ -z "$strategy_num" ]; then
-                strategy_num=1
-            fi
-
-            if ! echo "$strategy_num" | grep -qE '^[0-9]+$' || [ "$strategy_num" -lt 1 ] || [ "$strategy_num" -gt 199 ]; then
-                print_error "Неверный номер стратегии: $strategy_num"
-                pause
-                return 1
-            fi
-
-            # Обновить конфиг
             sed -i "s/^ENABLED=.*/ENABLED=1/" "$conf_file"
-            sed -i "s/^STRATEGY=.*/STRATEGY=$strategy_num/" "$conf_file"
+            print_success "Режим Austerus включен"
+            print_info "Пересоздание конфига..."
+            create_official_config "/opt/zapret2/config"
 
-            print_success "Режим ALL TCP-443 включен с стратегией #$strategy_num"
-            print_separator
-
-            # Перезапуск сервиса
             if is_zapret2_running; then
-                print_info "Перезапуск сервиса для применения изменений..."
+                print_info "Перезапуск сервиса..."
                 "$INIT_SCRIPT" restart
                 print_success "Сервис перезапущен"
             else
@@ -683,55 +646,19 @@ SUBMENU
             ;;
 
         2)
-            # Выключить режим
             if [ "$current_enabled" != "1" ]; then
-                print_info "Режим ALL TCP-443 уже выключен"
+                print_info "Режим уже выключен"
                 pause
                 return 0
             fi
 
             sed -i "s/^ENABLED=.*/ENABLED=0/" "$conf_file"
-            print_success "Режим ALL TCP-443 выключен"
-            print_separator
+            print_success "Режим Austerus выключен, возврат к автоциркулярам z2k"
+            print_info "Пересоздание конфига..."
+            create_official_config "/opt/zapret2/config"
 
-            # Перезапуск сервиса
             if is_zapret2_running; then
-                print_info "Перезапуск сервиса для применения изменений..."
-                "$INIT_SCRIPT" restart
-                print_success "Сервис перезапущен"
-            fi
-
-            pause
-            ;;
-
-        3)
-            # Изменить стратегию
-            if [ "$current_enabled" != "1" ]; then
-                print_warning "Режим ALL TCP-443 выключен"
-                print_info "Сначала включите режим через [1]"
-                pause
-                return 0
-            fi
-
-            printf "Текущая стратегия: #%s\n" "$current_strategy"
-            print_separator
-            printf "Введите новый номер стратегии [1-199]: "
-            read_input new_strategy
-
-            # Валидация
-            if ! echo "$new_strategy" | grep -qE '^[0-9]+$' || [ "$new_strategy" -lt 1 ] || [ "$new_strategy" -gt 199 ]; then
-                print_error "Неверный номер стратегии: $new_strategy"
-                pause
-                return 1
-            fi
-
-            sed -i "s/^STRATEGY=.*/STRATEGY=$new_strategy/" "$conf_file"
-            print_success "Стратегия изменена на #$new_strategy"
-            print_separator
-
-            # Перезапуск сервиса
-            if is_zapret2_running; then
-                print_info "Перезапуск сервиса для применения изменений..."
+                print_info "Перезапуск сервиса..."
                 "$INIT_SCRIPT" restart
                 print_success "Сервис перезапущен"
             fi

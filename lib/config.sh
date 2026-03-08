@@ -210,10 +210,9 @@ show_active_processing() {
     printf "\n"
 
     if [ "$all_tcp443_enabled" = "1" ]; then
-        print_warning "[WARN]  РЕЖИМ ALL TCP-443 ВКЛЮЧЕН"
-        printf "    Обрабатывается ВЕСЬ HTTPS трафик (порт 443)\n"
-        printf "    Стратегия: #%s\n" "$all_tcp443_strategy"
-        printf "    Списки доменов НЕ используются!\n"
+        print_warning "[WARN]  РЕЖИМ AUSTERUS ВКЛЮЧЕН (без хостлистов)"
+        printf "    Обрабатывается ВЕСЬ трафик (TCP 80/443, UDP 443)\n"
+        printf "    Хостлисты и автоциркуляры НЕ используются!\n"
         print_separator
     else
         print_success "[OK] Режим по спискам доменов (нормальный)"
@@ -292,7 +291,7 @@ show_active_processing() {
     # Итого
     if [ "$all_tcp443_enabled" = "1" ]; then
         print_warning "ВНИМАНИЕ: Весь HTTPS трафик обрабатывается!"
-        print_info "Чтобы выключить: sh z2k.sh menu → [A] Режим ALL TCP-443"
+        print_info "Чтобы выключить: sh z2k.sh menu → [A] Режим без хостлистов"
     else
         print_success "Режим работы: только списки доменов (рекомендуется)"
     fi
