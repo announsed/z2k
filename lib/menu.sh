@@ -66,7 +66,7 @@ MENU
 [A] Режим ALL TCP-443 (без хостлистов)
 [Q] Настройки QUIC
 [W] Whitelist (исключения)
-[S] Скрипты custom.d (не включать)
+[S] Скрипты custom.d
 [0] Выход
 
 MENU
@@ -755,7 +755,7 @@ SUBMENU
 
 menu_custom_scripts() {
     clear_screen
-    print_header "Скрипты custom.d (не включать без необходимости)"
+    print_header "Скрипты custom.d"
 
     local zapret_config="/opt/zapret2/config"
 
