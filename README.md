@@ -114,6 +114,24 @@ curl -fsSL https://raw.githubusercontent.com/necronicle/z2k/master/z2k.sh | sh
 
 ---
 
+## Полная зачистка (z2k_cleanup)
+
+Если zapret или zapret2 были удалены некорректно, остались зависшие процессы `nfqws`/`nfqws2`, мусорные iptables правила или директории — используйте скрипт полной зачистки:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/necronicle/z2k/master/z2k_cleanup.sh | sh
+```
+
+**ВНИМАНИЕ:** Скрипт удаляет ВСЁ связанное с zapret и zapret2:
+- Убивает все процессы `nfqws` и `nfqws2` (kill -9)
+- Удаляет init-скрипты, netfilter хуки, iptables цепочки
+- **Полностью удаляет директории `/opt/zapret` и `/opt/zapret2`** (включая конфиги, списки, стратегии)
+- Очищает ipset и временные файлы
+
+После зачистки можно выполнить чистую установку z2k.
+
+---
+
 ## Примечания
 
 - Если вы используете IPv6 в сети, убедитесь что он включён в прошивке (см. требования выше).
