@@ -2028,15 +2028,21 @@ EOF
         }
     fi
 
+    # Копируем результаты в постоянное хранилище
+    local persistent_log="/opt/zapret2/blockcheck.log"
+    cp -f "$log_file" "$persistent_log" 2>/dev/null || true
+    cp -f "$summary_file" "/opt/zapret2/blockcheck-summary.txt" 2>/dev/null || true
+    cp -f "$combined_candidates" "/opt/zapret2/blockcheck-combined.txt" 2>/dev/null || true
+
     print_separator
     print_success "Blockcheck modern завершен"
     print_info "  TLS кандидаты: $tcp_count"
     print_info "  QUIC кандидаты: $quic_count"
     print_info "  blockcheck exit code: $blockcheck_rc"
-    print_info "  Сводка: $summary_file"
-    print_info "  Combined: $combined_candidates"
+    print_info "  Сводка: /opt/zapret2/blockcheck-summary.txt"
+    print_info "  Combined: /opt/zapret2/blockcheck-combined.txt"
     [ -n "$export_file" ] && print_info "  Exported: $export_file"
-    print_info "  Log: $log_file"
+    print_info "  Log: $persistent_log"
 
     if [ "$tcp_count" -eq 0 ] && [ "$quic_count" -eq 0 ]; then
         print_warning "Рабочие кандидаты не найдены. Проверьте $log_file и скорректируйте list_*"
@@ -2156,10 +2162,15 @@ run_blockcheck_http() {
         "$init_script" start >/dev/null 2>&1 || true
     fi
 
+    # Копируем лог в постоянное хранилище
+    local persistent_log="/opt/zapret2/blockcheck-http.log"
+    cp -f "$log_file" "$persistent_log" 2>/dev/null || true
+    [ -s "$http_candidates" ] && cp -f "$http_candidates" "/opt/zapret2/http_candidates.txt" 2>/dev/null || true
+
     print_separator
     print_success "Blockcheck HTTP завершен"
     print_info "  HTTP кандидаты: $http_count"
-    print_info "  Log: $log_file"
+    print_info "  Log: $persistent_log"
 
     if [ "$http_count" -gt 0 ]; then
         print_separator
