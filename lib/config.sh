@@ -643,6 +643,13 @@ datadoghq.com
 okcdn.ru
 api.mycdn.me
 
+# === Keenetic (KeenDNS, облако, обновления) ===
+keenetic.pro
+keenetic.com
+keenetic.io
+keenetic.cloud
+keenetic.link
+
 # === Разработка ===
 raw.githubusercontent.com
 EOF
@@ -655,6 +662,20 @@ EOF
         fi
 
         print_success "Создан whitelist: $whitelist"
+    else
+        # Дозаписать keenetic домены если их нет (для существующих установок)
+        if ! grep -q "keenetic.pro" "$whitelist" 2>/dev/null; then
+            cat >> "$whitelist" <<'KEENETIC'
+
+# === Keenetic (KeenDNS, облако, обновления) ===
+keenetic.pro
+keenetic.com
+keenetic.io
+keenetic.cloud
+keenetic.link
+KEENETIC
+            print_info "Добавлены домены Keenetic в whitelist"
+        fi
     fi
 
     print_success "Базовая конфигурация создана"
