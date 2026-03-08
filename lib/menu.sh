@@ -58,7 +58,7 @@ MENU
 
 [1] Установить/Переустановить zapret2
 [2] Выбрать стратегию
-[3] RuTracker blockcheck
+[3] HTTP blockcheck (fast-torrent.ru)
 [4] Управление сервисом
 [5] Обновить списки доменов
 [6] Резервная копия/Восстановление
@@ -344,7 +344,7 @@ test_category_availability_rkn() {
 
 menu_rutracker_blockcheck() {
     clear_screen
-    print_header "[3] RuTracker blockcheck"
+    print_header "[3] HTTP blockcheck (fast-torrent.ru)"
 
     if ! is_zapret2_installed; then
         print_error "zapret2 не установлен"
@@ -352,9 +352,10 @@ menu_rutracker_blockcheck() {
         return
     fi
 
-    print_info "Запуск blockcheck для rutracker.org"
+    print_info "Запуск blockcheck для fast-torrent.ru (HTTP, порт 80)"
+    print_info "Поиск рабочей стратегии обхода HTTP DPI redirect"
     if confirm "Продолжить?" "Y"; then
-        run_blockcheck_modern "rutracker.org"
+        run_blockcheck_modern "fast-torrent.ru"
     fi
 
     pause
