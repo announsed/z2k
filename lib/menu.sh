@@ -625,9 +625,9 @@ menu_all_tcp443() {
 Применяются ко ВСЕМУ трафику на портах 80/443 (TCP+UDP).
 
 Стратегии:
-  HTTP  (TCP 80):  fake(zero_256, badsum+badseq) + multisplit
-  TLS   (TCP 443): fake(google_hello, badsum+badseq, tls_mod) + multidisorder
-  QUIC  (UDP 443): fake(zero_256)
+  HTTP  (TCP 80):  fake(zero_256, ttl=0, badsum+badseq) + multisplit
+  TLS   (TCP 443): 2x fake(zero_256+google_hello, ttl=0, badsum+badseq) + multidisorder
+  QUIC  (UDP 443): fake(zero_256, ttl=0)
 
 При включении заменяет ВСЕ профили z2k (YT/RKN/Discord/HTTP).
 При выключении возвращаются стандартные автоциркуляры z2k.
