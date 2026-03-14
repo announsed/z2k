@@ -1563,7 +1563,8 @@ run_full_install() {
 uninstall_zapret2() {
     print_header "Удаление zapret2"
 
-    if ! is_zapret2_installed; then
+    # Проверить наличие хоть чего-то от zapret2
+    if ! is_zapret2_installed && [ ! -d "$ZAPRET2_DIR" ] && [ ! -d "$CONFIG_DIR" ] && [ ! -f "$INIT_SCRIPT" ]; then
         print_info "zapret2 не установлен"
         return 0
     fi
@@ -1572,6 +1573,7 @@ uninstall_zapret2() {
     print_warning "  - Все файлы zapret2 ($ZAPRET2_DIR)"
     print_warning "  - Конфигурацию ($CONFIG_DIR)"
     print_warning "  - Init скрипт ($INIT_SCRIPT)"
+    print_warning "  - Правила iptables и netfilter хуки"
 
     printf "\n"
     if ! confirm "Вы уверены? Это действие необратимо!" "N"; then
@@ -1579,11 +1581,51 @@ uninstall_zapret2() {
         return 0
     fi
 
-    # Остановить сервис
-    if is_zapret2_running; then
+    # Остановить сервис через init-скрипт (мягкая попытка)
+    if [ -x "$INIT_SCRIPT" ]; then
         print_info "Остановка сервиса..."
-        "$INIT_SCRIPT" stop
+        "$INIT_SCRIPT" stop 2>/dev/null || true
     fi
+
+    # Принудительно убить оставшиеся процессы nfqws2
+    local pids
+    pids=$(pidof nfqws2 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        print_info "Завершение зависших процессов nfqws2..."
+        kill -9 $pids 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Очистка iptables цепочек zapret2
+    print_info "Очистка правил iptables..."
+    local chain
+    for chain in ZAPRET ZAPRET2 z2k_connmark z2k_dpi_rst; do
+        local parent
+        for parent in POSTROUTING PREROUTING FORWARD; do
+            while iptables -t mangle -C "$parent" -j "$chain" 2>/dev/null; do
+                iptables -t mangle -D "$parent" -j "$chain" 2>/dev/null || break
+            done
+            while ip6tables -t mangle -C "$parent" -j "$chain" 2>/dev/null; do
+                ip6tables -t mangle -D "$parent" -j "$chain" 2>/dev/null || break
+            done
+        done
+        iptables -t mangle -F "$chain" 2>/dev/null
+        iptables -t mangle -X "$chain" 2>/dev/null
+        ip6tables -t mangle -F "$chain" 2>/dev/null
+        ip6tables -t mangle -X "$chain" 2>/dev/null
+    done
+    # raw table (RST filter)
+    while iptables -t raw -C PREROUTING -j z2k_dpi_rst 2>/dev/null; do
+        iptables -t raw -D PREROUTING -j z2k_dpi_rst 2>/dev/null || break
+    done
+    iptables -t raw -F z2k_dpi_rst 2>/dev/null
+    iptables -t raw -X z2k_dpi_rst 2>/dev/null
+    # nat table (masquerade fix)
+    while iptables -t nat -C POSTROUTING -j z2k_masq_fix 2>/dev/null; do
+        iptables -t nat -D POSTROUTING -j z2k_masq_fix 2>/dev/null || break
+    done
+    iptables -t nat -F z2k_masq_fix 2>/dev/null
+    iptables -t nat -X z2k_masq_fix 2>/dev/null
 
     # Удалить init скрипт
     if [ -f "$INIT_SCRIPT" ]; then
@@ -1591,12 +1633,14 @@ uninstall_zapret2() {
         print_info "Удален init скрипт"
     fi
 
-    # Удалить netfilter хук
-    local hook_file="/opt/etc/ndm/netfilter.d/000-zapret2.sh"
-    if [ -f "$hook_file" ]; then
-        rm -f "$hook_file"
-        print_info "Удален netfilter хук"
-    fi
+    # Удалить netfilter хуки (все связанные с zapret)
+    local hook
+    for hook in /opt/etc/ndm/netfilter.d/*zapret*; do
+        if [ -f "$hook" ]; then
+            rm -f "$hook"
+            print_info "Удален netfilter хук: $(basename "$hook")"
+        fi
+    done
 
     # Удалить zapret2
     if [ -d "$ZAPRET2_DIR" ]; then
@@ -1609,6 +1653,15 @@ uninstall_zapret2() {
         rm -rf "$CONFIG_DIR"
         print_info "Удалена конфигурация"
     fi
+
+    # Очистить временные файлы
+    rm -rf /tmp/z2k /tmp/zapret2 /tmp/blockcheck* 2>/dev/null
+
+    # Очистить ipset
+    local setname
+    for setname in $(ipset list -n 2>/dev/null | grep -i "zapret\|z2k" || true); do
+        ipset destroy "$setname" 2>/dev/null
+    done
 
     print_success "zapret2 полностью удален"
 
