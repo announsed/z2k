@@ -50,7 +50,36 @@ for init in /opt/etc/init.d/S99zapret2 /opt/etc/init.d/S99zapret; do
 done
 
 # ==========================================
-# 2. Убийство всех процессов nfqws / nfqws2
+# 2. Удаление init-скриптов
+# ==========================================
+
+log_info "Удаление init-скриптов..."
+
+for init in /opt/etc/init.d/S99zapret2 /opt/etc/init.d/S99zapret \
+            /opt/etc/init.d/S99nfqws   /opt/etc/init.d/S99nfqws2; do
+    if [ -f "$init" ]; then
+        rm -f "$init"
+        log_info "  Удалён: $init"
+    fi
+done
+
+# ==========================================
+# 3. Удаление netfilter хуков
+# ==========================================
+
+log_info "Удаление netfilter хуков..."
+
+for hook in /opt/etc/ndm/netfilter.d/000-zapret2.sh \
+            /opt/etc/ndm/netfilter.d/000-zapret.sh \
+            /opt/etc/ndm/netfilter.d/*zapret*; do
+    if [ -f "$hook" ]; then
+        rm -f "$hook"
+        log_info "  Удалён: $hook"
+    fi
+done
+
+# ==========================================
+# 4. Убийство всех процессов nfqws / nfqws2
 # ==========================================
 
 log_info "Поиск и завершение процессов nfqws / nfqws2..."
@@ -69,7 +98,7 @@ done
 
 # Дополнительный поиск через ps (на случай если pidof не нашёл)
 for proc_name in nfqws2 nfqws; do
-    ps_pids=$(ps w 2>/dev/null | grep "[n]fq" | grep "$proc_name" | awk '{print $1}' || true)
+    ps_pids=$(ps w 2>/dev/null | awk -v name="$proc_name" '$0 ~ "/"name"( |$)" || $0 ~ " "name"( |$)" {print $1}' || true)
     if [ -n "$ps_pids" ]; then
         for pid in $ps_pids; do
             log_warn "  Убиваю $proc_name (PID $pid, найден через ps)"
@@ -86,7 +115,7 @@ else
 fi
 
 # ==========================================
-# 3. Очистка iptables правил и цепочек
+# 5. Очистка iptables правил и цепочек
 # ==========================================
 
 log_info "Очистка iptables правил zapret/zapret2..."
@@ -146,35 +175,6 @@ for table in mangle nat raw filter; do
 done
 
 # ==========================================
-# 4. Удаление init-скриптов
-# ==========================================
-
-log_info "Удаление init-скриптов..."
-
-for init in /opt/etc/init.d/S99zapret2 /opt/etc/init.d/S99zapret \
-            /opt/etc/init.d/S99nfqws   /opt/etc/init.d/S99nfqws2; do
-    if [ -f "$init" ]; then
-        rm -f "$init"
-        log_info "  Удалён: $init"
-    fi
-done
-
-# ==========================================
-# 5. Удаление netfilter хуков
-# ==========================================
-
-log_info "Удаление netfilter хуков..."
-
-for hook in /opt/etc/ndm/netfilter.d/000-zapret2.sh \
-            /opt/etc/ndm/netfilter.d/000-zapret.sh \
-            /opt/etc/ndm/netfilter.d/*zapret*; do
-    if [ -f "$hook" ]; then
-        rm -f "$hook"
-        log_info "  Удалён: $hook"
-    fi
-done
-
-# ==========================================
 # 6. Удаление директорий
 # ==========================================
 
@@ -228,7 +228,7 @@ echo ""
 log_info "=== Финальная проверка ==="
 
 # Проверка процессов
-remaining=$(ps w 2>/dev/null | grep -c "[n]fqws" || echo 0)
+remaining=$(ps w 2>/dev/null | awk '$0 ~ "/nfqws[2]?( |$)" || $0 ~ " nfqws[2]?( |$)"' | wc -l)
 if [ "$remaining" -gt 0 ]; then
     log_error "Остались запущенные процессы nfqws! Проверьте: ps | grep nfqws"
 else

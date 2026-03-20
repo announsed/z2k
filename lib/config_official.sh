@@ -118,11 +118,69 @@ AUSTERUS_OPT
     rkn_tcp=$(ensure_circular_nld2 "$rkn_tcp")
     quic_udp=$(ensure_circular_nld2 "$quic_udp")
 
+    # Conservative RST-based failure detection for TCP profiles.
+    # Adds --in-range=-s5556 so circular can see incoming RST from DPI.
+    # Adds ,empty to --payload so retransmissions (empty ACKs) are visible.
+    # Uses z2k_success_no_reset: success stops checking the connection but
+    # does NOT reset the host failure counter — prevents PC success from
+    # masking TV/console failures on the same domain.
+    # After circular: restores --in-range=x --payload=tls_client_hello for
+    # strategy instances (they should not see incoming or non-TLS packets).
+    ensure_circular_rst_detection() {
+        local input="$1"
+        # Skip if already has --in-range (e.g. QUIC, HTTP RKN)
+        case "$input" in *--in-range=*) printf '%s' "$input"; return ;; esac
+        # Skip if no circular
+        case "$input" in *--lua-desync=circular:*) ;; *) printf '%s' "$input"; return ;; esac
+
+        local out=""
+        local token=""
+        local circular_seen=0
+
+        for token in $input; do
+            case "$token" in
+                --payload=tls_client_hello)
+                    # Add ,empty to see retransmission ACKs
+                    token="--payload=tls_client_hello,empty"
+                    ;;
+                --lua-desync=circular:*)
+                    # Insert --in-range before circular
+                    out="${out:+$out }--in-range=-s5556"
+                    # Modify circular params: fails=5, time=300, add success_detector
+                    token=$(printf '%s' "$token" | sed \
+                        -e 's/:fails=[0-9]*/:fails=5/' \
+                        -e 's/:time=[0-9]*/:time=300/' \
+                    )
+                    token="${token}:success_detector=z2k_success_no_reset"
+                    circular_seen=1
+                    ;;
+            esac
+            if [ "$circular_seen" = "1" ]; then
+                case "$token" in
+                    --lua-desync=circular:*) ;;
+                    --lua-desync=*)
+                        # First strategy after circular: insert --in-range=x --payload=tls_client_hello before it
+                        out="${out:+$out }--in-range=x --payload=tls_client_hello"
+                        circular_seen=2
+                        ;;
+                esac
+            fi
+            out="${out:+$out }$token"
+        done
+
+        printf '%s' "$out"
+    }
+
+    youtube_tcp=$(ensure_circular_rst_detection "$youtube_tcp")
+    youtube_gv_tcp=$(ensure_circular_rst_detection "$youtube_gv_tcp")
+    rkn_tcp=$(ensure_circular_rst_detection "$rkn_tcp")
+
 
 
 
     # Генерировать NFQWS2_OPT в формате официального config
     local nfqws2_opt_lines=""
+    local autohostlist_file="/opt/zapret2/ipset/zapret-hosts-auto.txt"
 
     # Helper: проверить наличие и непустоту hostlist-файлов
     add_hostlist_line() {
@@ -137,7 +195,7 @@ AUSTERUS_OPT
     }
 
     # RKN TCP (include Discord hostlist into RKN profile)
-    local rkn_hostlists="--hostlist=${extra_strats_dir}/TCP/RKN/List.txt"
+    local rkn_hostlists="--hostlist=${extra_strats_dir}/TCP/RKN/List.txt --hostlist=$autohostlist_file"
     [ -s "${extra_strats_dir}/TCP_Discord.txt" ] && rkn_hostlists="$rkn_hostlists --hostlist=${extra_strats_dir}/TCP_Discord.txt"
     add_hostlist_line "${extra_strats_dir}/TCP/RKN/List.txt" "--hostlist-exclude=${lists_dir}/whitelist.txt $rkn_hostlists $rkn_tcp --new"
 
@@ -175,7 +233,16 @@ AUSTERUS_OPT
     # Upstream zapret appends --hostlist-auto to the very end of NFQWS2_OPT, 
     # so we place this empty profile last to receive those parameters.
     # It catches unknown domains, tracks failures, and sync_autohostlist_to_rkn moves them to RKN.
-    nfqws2_opt_lines="$nfqws2_opt_lines--filter-tcp=80,443 --hostlist-exclude=${lists_dir}/whitelist.txt\\n"
+    local catchall="--filter-tcp=80,443 --hostlist-exclude=${lists_dir}/whitelist.txt"
+    catchall="$catchall --hostlist=$autohostlist_file"
+    catchall="$catchall --hostlist-auto=$autohostlist_file"
+    catchall="$catchall --hostlist-auto-fail-threshold=3"
+    catchall="$catchall --hostlist-auto-fail-time=60"
+    catchall="$catchall --hostlist-auto-retrans-threshold=3"
+    catchall="$catchall --hostlist-auto-retrans-reset=1"
+    catchall="$catchall --hostlist-auto-retrans-maxseq=32768"
+    catchall="$catchall --hostlist-auto-incoming-maxseq=4096"
+    nfqws2_opt_lines="$nfqws2_opt_lines$catchall\\n"
 
     local nfqws2_opt_value
     nfqws2_opt_value=$(printf "%b" "$nfqws2_opt_lines" | sed '/^$/d')
