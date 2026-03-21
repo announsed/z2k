@@ -24,11 +24,11 @@ z2k — модульный установщик zapret2 для роутеров 
 ## Особенности
 
 - Установка zapret2 (openwrt-embedded релиз) без компиляции, с проверкой работоспособности `nfqws2`
-- Три TCP autocircular профиля с разными стратегиями (по 17 стратегий на категорию):
-  - **RKN** — заблокированные сайты (TCP/TLS + HTTP)
-  - **YouTube TCP** — youtube.com и связанные домены
-  - **YouTube GV** — googlevideo CDN (стриминг)
-- QUIC autocircular профиль: YouTube QUIC (UDP/443) по доменному списку
+- Три TCP autocircular профиля с разными стратегиями:
+  - **RKN** — заблокированные сайты (TCP/TLS + HTTP) — 45 стратегий
+  - **YouTube TCP** — youtube.com и связанные домены — 22 стратегии
+  - **YouTube GV** — googlevideo CDN (стриминг) — 22 стратегии
+- QUIC autocircular профиль: YouTube QUIC (UDP/443) по доменному списку — 12 стратегий
 - Discord профили:
   - TCP: производится от RKN-стратегии с hostlist Discord
   - UDP voice/video: `circular_locked` (стратегия закрепляется per-domain через `locked.tsv`)
