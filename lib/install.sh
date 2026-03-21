@@ -507,6 +507,11 @@ step_load_kernel_modules() {
         load_kernel_module "$module" || print_warning "Модуль $module не загружен"
     done
 
+    # Load ip_set_bitmap_port from system modules (Entware modprobe cannot find it)
+    if ! lsmod | grep -q "ip_set_bitmap_port"; then
+        insmod /lib/modules/$(uname -r)/ip_set_bitmap_port.ko 2>/dev/null || true
+    fi
+
     print_success "Модули ядра загружены"
     return 0
 }
