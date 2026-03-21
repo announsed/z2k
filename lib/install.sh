@@ -1413,30 +1413,6 @@ step_finalize() {
         return 1
     fi
 
-    # Запустить сервис
-    print_info "Запуск сервиса zapret2..."
-
-    if "$INIT_SCRIPT" start 2>&1; then
-        print_success "Команда start выполнена"
-    else
-        print_error "Не удалось запустить сервис"
-        print_info "Пробую запустить с подробным выводом..."
-        sh -x "$INIT_SCRIPT" start 2>&1 | tail -20
-        return 1
-    fi
-
-    sleep 2
-
-    # Проверить статус
-    if is_zapret2_running; then
-        print_success "zapret2 работает"
-    else
-        print_warning "Сервис запущен, но процесс не обнаружен"
-        print_info "Проверка процессов:"
-        ps | grep -i nfqws || echo "Процессов nfqws не найдено"
-        print_info "Проверьте логи: $INIT_SCRIPT status"
-    fi
-
     # =========================================================================
     # НАСТРОЙКА АВТООБНОВЛЕНИЯ СПИСКОВ ДОМЕНОВ (КРИТИЧНО)
     # =========================================================================
