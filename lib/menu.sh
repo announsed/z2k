@@ -67,12 +67,10 @@ MENU
         cat <<'MENU'
 
 [1] Установить/Переустановить zapret2
-[2] Выбрать стратегию
-[3] HTTP blockcheck (fast-torrent.ru)
-[4] Управление сервисом
-[5] Обновить списки доменов
-[6] Резервная копия/Восстановление
-[7] Удалить zapret2
+[2] Управление сервисом
+[3] Обновить списки доменов
+[4] Резервная копия/Восстановление
+[5] Удалить zapret2
 [A] Режим без хостлистов (для Austerusj)
 [Q] Настройки QUIC
 [W] Whitelist (исключения)
@@ -82,7 +80,7 @@ MENU
 
 MENU
 
-        printf "Выберите опцию [0-7,A,Q,R,W,S]: "
+        printf "Выберите опцию [0-5,A,Q,R,W,S]: "
         read_input choice
 
         case "$choice" in
@@ -90,21 +88,15 @@ MENU
                 menu_install
                 ;;
             2)
-                menu_select_strategy
-                ;;
-            3)
-                menu_rutracker_blockcheck
-                ;;
-            4)
                 menu_service_control
                 ;;
-            5)
+            3)
                 menu_update_lists
                 ;;
-            6)
+            4)
                 menu_backup_restore
                 ;;
-            7)
+            5)
                 menu_uninstall
                 ;;
             a|A)
@@ -325,7 +317,7 @@ test_category_availability() {
         print_success "[OK] $category_name доступен! Стратегия работает."
     else
         print_error "[FAIL] $category_name недоступен. Попробуйте другую стратегию."
-        print_info "Рекомендация: запустите автотест [3] для поиска рабочей стратегии"
+        print_info "Стратегии переключаются автоматически через autocircular."
     fi
 }
 
@@ -348,7 +340,7 @@ test_category_availability_rkn() {
         print_success "[OK] RKN доступен! Стратегия работает. (${success_count}/3)"
     else
         print_error "[FAIL] RKN недоступен. Попробуйте другую стратегию. (${success_count}/3)"
-        print_info "Рекомендация: запустите автотест [3] для поиска рабочей стратегии"
+        print_info "Стратегии переключаются автоматически через autocircular."
     fi
 }
 
