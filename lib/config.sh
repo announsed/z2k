@@ -520,6 +520,7 @@ vkvideo.ru
 rutube.ru
 yandex.ru
 ya.ru
+yandex.cloud
 kinopoisk.ru
 okko.tv
 avito.ru
