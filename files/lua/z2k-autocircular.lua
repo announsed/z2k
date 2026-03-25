@@ -38,7 +38,7 @@ local debug_refresh_interval = 5 -- seconds
 
 math.randomseed(os.time() or 0)
 
-local policy_enabled = true
+local policy_enabled = false
 local policy_epsilon = 0.15
 local policy_cooldown_sec = 120
 local policy_ucb_c = 0.65
@@ -66,11 +66,31 @@ local function normalize_hostkey_for_state(hostkey)
   return string.lower(s)
 end
 
+local function can_read_file(path)
+  local f = io.open(path, "r")
+  if not f then return false end
+  f:close()
+  return true
+end
+
+local function can_append_existing_file(path)
+  if not can_read_file(path) then return false end
+  local f = io.open(path, "a")
+  if not f then return false end
+  f:close()
+  return true
+end
+
 local function choose_state_file_for_read()
-  local f = io.open(STATE_FILE_PRIMARY, "r")
-  if f then f:close(); return STATE_FILE_PRIMARY end
-  f = io.open(STATE_FILE_FALLBACK, "r")
-  if f then f:close(); return STATE_FILE_FALLBACK end
+  if can_append_existing_file(STATE_FILE_PRIMARY) then
+    return STATE_FILE_PRIMARY
+  end
+  if can_read_file(STATE_FILE_FALLBACK) then
+    return STATE_FILE_FALLBACK
+  end
+  if can_read_file(STATE_FILE_PRIMARY) then
+    return STATE_FILE_PRIMARY
+  end
   return nil
 end
 
@@ -146,6 +166,34 @@ local function ensure_state_file_exists()
   return nil
 end
 
+local function merge_state_file_into(path, dest)
+  if not path or not dest then return end
+  local f = io.open(path, "r")
+  if not f then return end
+
+  for line in f:lines() do
+    if line ~= "" and not line:match("^%s*#") then
+      local askey, host, strat, ts = line:match("^([^\t]+)\t([^\t]+)\t([0-9]+)\t?([0-9]*)")
+      if askey and host and strat then
+        local n = tonumber(strat)
+        if n and n >= 1 then
+          local hn = normalize_hostkey_for_state(host)
+          if hn then
+            if not dest[askey] then dest[askey] = {} end
+            local tsn = tonumber(ts) or 0
+            local prev = dest[askey][hn]
+            if (not prev) or ((tonumber(prev.ts) or 0) <= tsn) then
+              dest[askey][hn] = { strategy = n, ts = tsn }
+            end
+          end
+        end
+      end
+    end
+  end
+
+  f:close()
+end
+
 local function create_empty_telemetry_file(path)
   local f = io.open(path, "w")
   if not f then return false end
@@ -156,10 +204,15 @@ local function create_empty_telemetry_file(path)
 end
 
 local function choose_telemetry_file_for_read()
-  local f = io.open(TELEMETRY_FILE_PRIMARY, "r")
-  if f then f:close(); return TELEMETRY_FILE_PRIMARY end
-  f = io.open(TELEMETRY_FILE_FALLBACK, "r")
-  if f then f:close(); return TELEMETRY_FILE_FALLBACK end
+  if can_append_existing_file(TELEMETRY_FILE_PRIMARY) then
+    return TELEMETRY_FILE_PRIMARY
+  end
+  if can_read_file(TELEMETRY_FILE_FALLBACK) then
+    return TELEMETRY_FILE_FALLBACK
+  end
+  if can_read_file(TELEMETRY_FILE_PRIMARY) then
+    return TELEMETRY_FILE_PRIMARY
+  end
   return nil
 end
 
@@ -182,6 +235,41 @@ local function ensure_telemetry_file_exists()
   return nil
 end
 
+local function merge_telemetry_file_into(path, dest)
+  if not path or not dest then return end
+  local f = io.open(path, "r")
+  if not f then return end
+
+  for line in f:lines() do
+    if line ~= "" and not line:match("^%s*#") then
+      local askey, hostn, strat, okv, failv, latv, tsv, cdv =
+        line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]*)\t?([^\t]*)")
+      local s = tonumber(strat)
+      if askey and hostn and s and s >= 1 then
+        if not dest[askey] then dest[askey] = {} end
+        if not dest[askey][hostn] then dest[askey][hostn] = {} end
+        local next_rec = {
+          ok = tonumber(okv) or 0,
+          fail = tonumber(failv) or 0,
+          lat = tonumber(latv) or 0,
+          ts = tonumber(tsv) or 0,
+          cooldown_until = tonumber(cdv) or 0,
+        }
+        local prev = dest[askey][hostn][s]
+        local prev_ts = prev and (tonumber(prev.ts) or 0) or -1
+        local next_ts = tonumber(next_rec.ts) or 0
+        local prev_cd = prev and (tonumber(prev.cooldown_until) or 0) or -1
+        local next_cd = tonumber(next_rec.cooldown_until) or 0
+        if (not prev) or (next_ts > prev_ts) or (next_ts == prev_ts and next_cd >= prev_cd) then
+          dest[askey][hostn][s] = next_rec
+        end
+      end
+    end
+  end
+
+  f:close()
+end
+
 local function load_state()
   if loaded then return end
   loaded = true
@@ -190,26 +278,8 @@ local function load_state()
   local path = ensure_state_file_exists()
   if not path then return end
 
-  local f = io.open(path, "r")
-  if not f then return end
-
-  for line in f:lines() do
-    if line ~= "" and not line:match("^%s*#") then
-      local askey, host, strat, ts = line:match("^([^\t]+)\t([^\t]+)\t([0-9]+)\t?([0-9]*)")
-              if askey and host and strat then
-                local n = tonumber(strat)
-                if n and n >= 1 then
-                  local hn = normalize_hostkey_for_state(host)
-                  if hn then
-            if not state[askey] then state[askey] = {} end
-            state[askey][hn] = { strategy = n, ts = tonumber(ts) or 0 }
-          end
-        end
-      end
-    end
-  end
-
-  f:close()
+  merge_state_file_into(STATE_FILE_PRIMARY, state)
+  merge_state_file_into(STATE_FILE_FALLBACK, state)
 end
 
 local MAX_ENTRIES_PER_KEY = 500
@@ -306,11 +376,17 @@ local function write_state()
   pending_write = false
 
   local path = choose_state_file_for_write()
-  if not path then return end
+  if not path then
+    pending_write = true
+    return
+  end
 
   -- Acquire lock to prevent concurrent writes
   local locked, lockfile = acquire_lock(path)
-  if not locked then return end -- another process is writing, skip this cycle
+  if not locked then
+    pending_write = true
+    return
+  end -- another process is writing, skip this cycle
 
   local tmp = path .. ".tmp"
 
@@ -347,6 +423,7 @@ local function write_state()
 
   local f = io.open(tmp, "w")
   if not f then
+    pending_write = true
     release_lock(lockfile)
     return
   end
@@ -367,6 +444,7 @@ local function write_state()
   if not ok then
     DLOG("ERROR: rename %s -> %s failed: %s\n", tmp, path, tostring(err))
     os.remove(tmp)
+    pending_write = true
   end
   release_lock(lockfile)
 end
@@ -408,27 +486,9 @@ local function load_telemetry()
 
   local path = ensure_telemetry_file_exists()
   if not path then return end
-  local f = io.open(path, "r")
-  if not f then return end
 
-  for line in f:lines() do
-    if line ~= "" and not line:match("^%s*#") then
-      local askey, hostn, strat, okv, failv, latv, tsv, cdv =
-        line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]*)\t?([^\t]*)")
-      local s = tonumber(strat)
-      if askey and hostn and s and s >= 1 then
-        local r = telemetry_rec(askey, hostn, s, true)
-        if r then
-          r.ok = tonumber(okv) or 0
-          r.fail = tonumber(failv) or 0
-          r.lat = tonumber(latv) or 0
-          r.ts = tonumber(tsv) or 0
-          r.cooldown_until = tonumber(cdv) or 0
-        end
-      end
-    end
-  end
-  f:close()
+  merge_telemetry_file_into(TELEMETRY_FILE_PRIMARY, telemetry)
+  merge_telemetry_file_into(TELEMETRY_FILE_FALLBACK, telemetry)
 end
 
 local function write_telemetry()

@@ -118,6 +118,65 @@ AUSTERUS_OPT
     rkn_tcp=$(ensure_circular_nld2 "$rkn_tcp")
     quic_udp=$(ensure_circular_nld2 "$quic_udp")
 
+    # Let circular observe incoming TLS replies as well.
+    # Many legacy strategy packs use top-level --payload=tls_client_hello only,
+    # which means circular() sees only outgoing ClientHello packets and cannot
+    # classify reply-side success/failure for apps that stall before retry loops
+    # (notably Smart TV clients). We widen only the top-level payload filter;
+    # desync sub-actions still keep their own payload=tls_client_hello scopes.
+    ensure_tls_circular_payload_visibility() {
+        local input="$1"
+        local out=""
+        local token=""
+        local payload=""
+        local has_tls="0"
+        local has_circular="0"
+
+        for token in $input; do
+            case "$token" in
+                --filter-l7=tls) has_tls="1" ;;
+                --lua-desync=circular:*) has_circular="1" ;;
+            esac
+        done
+
+        if [ "$has_tls" != "1" ] || [ "$has_circular" != "1" ]; then
+            printf '%s' "$input"
+            return 0
+        fi
+
+        for token in $input; do
+            case "$token" in
+                --payload=*)
+                    payload="${token#--payload=}"
+                    case ",$payload," in
+                        *,tls_client_hello,*)
+                            case ",$payload," in
+                                *,tls_server_hello,*) ;;
+                                *) payload="${payload},tls_server_hello" ;;
+                            esac
+                            case ",$payload," in
+                                *,http_reply,*) ;;
+                                *) payload="${payload},http_reply" ;;
+                            esac
+                            case ",$payload," in
+                                *,unknown,*) ;;
+                                *) payload="${payload},unknown" ;;
+                            esac
+                            token="--payload=${payload}"
+                            ;;
+                    esac
+                    ;;
+            esac
+            out="${out:+$out }$token"
+        done
+
+        printf '%s' "$out"
+    }
+
+    youtube_tcp=$(ensure_tls_circular_payload_visibility "$youtube_tcp")
+    youtube_gv_tcp=$(ensure_tls_circular_payload_visibility "$youtube_gv_tcp")
+    rkn_tcp=$(ensure_tls_circular_payload_visibility "$rkn_tcp")
+
 
 
 

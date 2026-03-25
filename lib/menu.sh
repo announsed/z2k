@@ -957,7 +957,6 @@ netflix.com
 vsetop.org
 
 # === Google API ===
-jnn-pa.googleapis.com
 ogs.google.com
 gstatic.com
 
