@@ -76,17 +76,17 @@ confirm() {
             return 1
         fi
 
-        answer=$(printf '%s' "$answer" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        answer=$(printf '%s' "$answer" | tr -d "$(printf '\r\b\177')" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 
         case "$answer" in
             "")
                 [ "$default" = "Y" ] && return 0
                 return 1
                 ;;
-            [Yy]|[Yy][Ee][Ss]|[Дд]|[Дд][Аа])
+            *[Yy]|*[Yy][Ee][Ss]|*[Дд]|*[Дд][Аа])
                 return 0
                 ;;
-            [Nn]|[Nn][Oo]|[Нн][Ее][Тт])
+            *[Nn]|*[Nn][Oo]|*[Нн][Ее][Тт])
                 return 1
                 ;;
             *)
