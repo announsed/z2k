@@ -63,25 +63,37 @@ print_separator() {
 confirm() {
     local prompt=${1:-"Продолжить?"}
     local default=${2:-"Y"}
+    local answer=""
 
-    if [ "$default" = "Y" ]; then
-        printf "%s [Y/n]: " "$prompt"
-    else
-        printf "%s [y/N]: " "$prompt"
-    fi
+    while true; do
+        if [ "$default" = "Y" ]; then
+            printf "%s [Y/n]: " "$prompt"
+        else
+            printf "%s [y/N]: " "$prompt"
+        fi
 
-    read -r answer </dev/tty
-
-    case "$answer" in
-        [Yy]|[Yy][Ee][Ss]|"")
-            [ "$default" = "Y" ] && return 0
-            [ "$answer" != "" ] && return 0
+        if ! read -r answer </dev/tty; then
             return 1
-            ;;
-        *)
-            return 1
-            ;;
-    esac
+        fi
+
+        answer=$(printf '%s' "$answer" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+
+        case "$answer" in
+            "")
+                [ "$default" = "Y" ] && return 0
+                return 1
+                ;;
+            [Yy]|[Yy][Ee][Ss]|[Дд]|[Дд][Аа])
+                return 0
+                ;;
+            [Nn]|[Nn][Oo]|[Нн][Ее][Тт])
+                return 1
+                ;;
+            *)
+                print_info "Введите y/n"
+                ;;
+        esac
+    done
 }
 
 # ==============================================================================
