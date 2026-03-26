@@ -122,8 +122,9 @@ AUSTERUS_OPT
     # Many legacy strategy packs use top-level --payload=tls_client_hello only,
     # which means circular() sees only outgoing ClientHello packets and cannot
     # classify reply-side success/failure for apps that stall before retry loops
-    # (notably Smart TV clients). We widen only the top-level payload filter;
-    # desync sub-actions still keep their own payload=tls_client_hello scopes.
+    # (notably Smart TV clients). We also force bidirectional visibility with
+    # --in-range=a so reply packets actually reach circular(); desync sub-actions
+    # still keep their own payload=tls_client_hello scopes.
     ensure_tls_circular_payload_visibility() {
         local input="$1"
         local out=""
@@ -131,6 +132,7 @@ AUSTERUS_OPT
         local payload=""
         local has_tls="0"
         local has_circular="0"
+        local has_in_range="0"
 
         for token in $input; do
             case "$token" in
@@ -166,9 +168,23 @@ AUSTERUS_OPT
                             ;;
                     esac
                     ;;
+                --in-range=*)
+                    token="--in-range=a"
+                    has_in_range="1"
+                    ;;
+                --out-range=*)
+                    if [ "$has_in_range" != "1" ]; then
+                        out="${out:+$out }--in-range=a"
+                        has_in_range="1"
+                    fi
+                    ;;
             esac
             out="${out:+$out }$token"
         done
+
+        if [ "$has_in_range" != "1" ]; then
+            out="${out:+$out }--in-range=a"
+        fi
 
         printf '%s' "$out"
     }
