@@ -200,6 +200,10 @@ ensure_autocircular_files()
 	chmod 644 "$base/state.tsv" 2>/dev/null || true
 	chown nobody "$base/state.tsv" 2>/dev/null || true
 
+	[ -f "$base/telemetry.tsv" ] || : > "$base/telemetry.tsv"
+	chmod 644 "$base/telemetry.tsv" 2>/dev/null || true
+	chown nobody "$base/telemetry.tsv" 2>/dev/null || true
+
 	[ -f "$base/debug.log" ] || : > "$base/debug.log"
 	chmod 644 "$base/debug.log" 2>/dev/null || true
 	chown nobody "$base/debug.log" 2>/dev/null || true

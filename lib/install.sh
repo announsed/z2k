@@ -782,11 +782,19 @@ step_build_zapret2() {
     : > "${ZAPRET2_DIR}/extra_strats/cache/autocircular/state.tsv" 2>/dev/null || true
     chmod 644 "${ZAPRET2_DIR}/extra_strats/cache/autocircular/state.tsv" 2>/dev/null || true
     chown nobody "${ZAPRET2_DIR}/extra_strats/cache/autocircular/state.tsv" 2>/dev/null || true
+    : > "${ZAPRET2_DIR}/extra_strats/cache/autocircular/telemetry.tsv" 2>/dev/null || true
+    chmod 644 "${ZAPRET2_DIR}/extra_strats/cache/autocircular/telemetry.tsv" 2>/dev/null || true
+    chown nobody "${ZAPRET2_DIR}/extra_strats/cache/autocircular/telemetry.tsv" 2>/dev/null || true
     # Debug is opt-in. Keep log file prepared, but do not enable verbose logging by default.
     rm -f "${ZAPRET2_DIR}/extra_strats/cache/autocircular/debug.flag" 2>/dev/null || true
     : > "${ZAPRET2_DIR}/extra_strats/cache/autocircular/debug.log" 2>/dev/null || true
     chmod 644 "${ZAPRET2_DIR}/extra_strats/cache/autocircular/debug.log" 2>/dev/null || true
     chown nobody "${ZAPRET2_DIR}/extra_strats/cache/autocircular/debug.log" 2>/dev/null || true
+    # Fresh install/reinstall must not inherit stale fallback cache from /tmp.
+    rm -f /tmp/z2k-autocircular-state.tsv \
+          /tmp/z2k-autocircular-telemetry.tsv \
+          /tmp/z2k-autocircular-debug.flag \
+          /tmp/z2k-autocircular-debug.log 2>/dev/null || true
 
     if curl -fsSL "https://raw.githubusercontent.com/AloofLibra/zapret4rocket/z2r/orchestra/locked.lua" \
         -o "${ZAPRET2_DIR}/lua/locked.lua"; then
