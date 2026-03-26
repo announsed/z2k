@@ -838,6 +838,8 @@ sudrf.ru
 
 # === Российские сервисы ===
 vk.com
+vkcdn.net
+userapi.com
 vk.ru
 vkvideo.ru
 rutube.ru
