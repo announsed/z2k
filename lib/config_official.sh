@@ -118,7 +118,7 @@ AUSTERUS_OPT
     rkn_tcp=$(ensure_circular_nld2 "$rkn_tcp")
     quic_udp=$(ensure_circular_nld2 "$quic_udp")
 
-    # Let circular observe incoming TLS replies as well.
+    # Let YouTube TLS circular profiles observe incoming replies as well.
     # Many legacy strategy packs use top-level --payload=tls_client_hello only,
     # which means circular() sees only outgoing ClientHello packets and cannot
     # classify reply-side success/failure for apps that stall before retry loops
@@ -191,7 +191,6 @@ AUSTERUS_OPT
 
     youtube_tcp=$(ensure_tls_circular_payload_visibility "$youtube_tcp")
     youtube_gv_tcp=$(ensure_tls_circular_payload_visibility "$youtube_gv_tcp")
-    rkn_tcp=$(ensure_tls_circular_payload_visibility "$rkn_tcp")
 
 
 
