@@ -217,6 +217,15 @@ ensure_autocircular_files()
 	[ -f "$base/debug.flag" ] && chown nobody "$base/debug.flag" 2>/dev/null || true
 }
 
+repair_autocircular_files_after_daemon_start()
+{
+	# nfqws2 can touch autocircular files very early during boot/restart.
+	# Re-apply ownership after daemon spawn so runtime keeps using primary cache.
+	ensure_autocircular_files
+	sleep 1
+	ensure_autocircular_files
+}
+
 # ------------------------------------------------------------------------------
 # TRAFFIC DEBUG: capture "real traffic" (tcpdump pcap) and "traffic in zapret" (nfqws2 --debug log)
 # ------------------------------------------------------------------------------
@@ -723,12 +732,16 @@ start_daemons()
 {
     echo "Starting zapret2 daemons"
 
+    ensure_autocircular_files
+
     # ������������ ������� �� common/linux_daemons.sh
     # standard_mode_daemons �������� do_nfqws
     standard_mode_daemons 1
 
     # ��������� custom scripts ���� ����
     custom_runner zapret_custom_daemons 1
+
+    repair_autocircular_files_after_daemon_start
 
     return 0
 }
@@ -1281,13 +1294,6 @@ start()
 
     # 3. ��������� daemon ��������
     start_daemons
-
-    # nfqws2 may touch autocircular state very early during startup, before the
-    # runtime user fully takes over. Re-apply ownership right after daemon start
-    # so persistence keeps using primary cache files instead of falling back to /tmp.
-    ensure_autocircular_files
-    sleep 1
-    ensure_autocircular_files
 
     # 4. ��������� orchestrator (circular_locked rotation)
     [ -x "$ORCH_SCRIPT" ] && "$ORCH_SCRIPT" start

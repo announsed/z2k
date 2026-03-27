@@ -81,6 +81,25 @@ local function can_append_existing_file(path)
   return true
 end
 
+local function can_replace_file_via_parent_dir(path)
+  if is_blank(path) then return false end
+  local dir = tostring(path):match("^(.*)/[^/]+$")
+  if is_blank(dir) then return false end
+
+  local probe = string.format(
+    "%s/.z2k-write-probe-%d-%d.tmp",
+    dir,
+    tonumber(os.time() or 0) or 0,
+    math.random(100000, 999999)
+  )
+
+  local f = io.open(probe, "w")
+  if not f then return false end
+  f:close()
+  os.remove(probe)
+  return true
+end
+
 local function choose_state_file_for_read()
   if can_append_existing_file(STATE_FILE_PRIMARY) then
     return STATE_FILE_PRIMARY
@@ -149,7 +168,13 @@ local function choose_state_file_for_write()
   if can_append_existing_file(STATE_FILE_PRIMARY) then
     return STATE_FILE_PRIMARY
   end
+  if can_replace_file_via_parent_dir(STATE_FILE_PRIMARY) then
+    return STATE_FILE_PRIMARY
+  end
   if can_append_existing_file(STATE_FILE_FALLBACK) then
+    return STATE_FILE_FALLBACK
+  end
+  if can_replace_file_via_parent_dir(STATE_FILE_FALLBACK) then
     return STATE_FILE_FALLBACK
   end
   if create_empty_state_file(STATE_FILE_FALLBACK) then
@@ -216,7 +241,13 @@ local function choose_telemetry_file_for_write()
   if can_append_existing_file(TELEMETRY_FILE_PRIMARY) then
     return TELEMETRY_FILE_PRIMARY
   end
+  if can_replace_file_via_parent_dir(TELEMETRY_FILE_PRIMARY) then
+    return TELEMETRY_FILE_PRIMARY
+  end
   if can_append_existing_file(TELEMETRY_FILE_FALLBACK) then
+    return TELEMETRY_FILE_FALLBACK
+  end
+  if can_replace_file_via_parent_dir(TELEMETRY_FILE_FALLBACK) then
     return TELEMETRY_FILE_FALLBACK
   end
   if create_empty_telemetry_file(TELEMETRY_FILE_FALLBACK) then
