@@ -197,11 +197,36 @@ check_disk_space() {
 }
 
 # Проверка наличия curl
+# Эта функция проверяет наличие утилиты curl в системе и устанавливает её если она отсутствует.
+# curl необходим для загрузки файлов из интернета (списки доменов, стратегии, обновления).
+# Возвращаемые значения:
+#   0 - curl установлен или успешно установлен
+#   1 - не удалось установить curl
 check_curl() {
+    # Проверить наличие curl в PATH
     if ! command -v curl >/dev/null 2>&1; then
         print_error "curl не установлен"
         print_info "Установка curl..."
-        opkg update && opkg install curl || return 1
+        
+        # Использовать правильный путь к opkg (предпочтительно /opt/bin/opkg)
+        local opkg_bin="opkg"
+        [ -x /opt/bin/opkg ] && opkg_bin="/opt/bin/opkg"
+        
+        # Сначала обновить списки пакетов, затем установить curl
+        # Важно: проверяем успешность каждой операции отдельно
+        if ! "$opkg_bin" update; then
+            print_error "Не удалось обновить списки пакетов opkg"
+            print_info "Попробуйте вручную: $opkg_bin update"
+            return 1
+        fi
+        
+        if ! "$opkg_bin" install curl; then
+            print_error "Не удалось установить curl"
+            print_info "Проверьте наличие места на диске и подключение к интернету"
+            return 1
+        fi
+        
+        print_success "curl успешно установлен"
     fi
     return 0
 }
@@ -263,7 +288,11 @@ get_current_strategy() {
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==============================================================================
 
-# Скачать файл с проверкой
+# Скачать файл с проверкой целостности
+# Параметры:
+#   $1 - URL для загрузки
+#   $2 - Путь для сохранения файла
+#   $3 - Описание процесса (необязательно, по умолчанию "Загрузка файла")
 download_file() {
     local url=$1
     local output=$2
@@ -271,16 +300,33 @@ download_file() {
 
     print_info "$description..."
 
-    if curl -fsSL "$url" -o "$output"; then
-        print_success "Загружено: $output"
-        return 0
+    # Загрузить файл с таймаутами и проверкой соединения
+    if curl -fsSL --connect-timeout 10 --max-time 120 "$url" -o "$output"; then
+        # Проверить что файл не пустой
+        if [ -s "$output" ]; then
+            print_success "Загружено: $output ($(wc -c < "$output") байт)"
+            return 0
+        else
+            print_error "Файл загружен но пуст: $output"
+            rm -f "$output"
+            return 1
+        fi
     else
         print_error "Ошибка загрузки: $url"
+        print_info "Проверьте подключение к интернету и доступность сервера"
+        rm -f "$output" 2>/dev/null
         return 1
     fi
 }
 
 # Создать резервную копию файла
+# Эта функция создаёт резервную копию указанного файла с добавлением временной метки.
+# Автоматически удаляет старые бэкапы, оставляя только последние 5 версий.
+# Параметры:
+#   $1 - путь к файлу для создания бэкапа
+# Возвращаемые значения:
+#   0 - бэкап создан успешно или файл не существует
+#   1 - ошибка при создании бэкапа
 backup_file() {
     local file=$1
     local backup="${file}.backup.$(date +%Y%m%d_%H%M%S)"
@@ -294,13 +340,21 @@ backup_file() {
         if [ -n "$old_backups" ]; then
             echo "$old_backups" | while read -r old_backup; do
                 rm -f "$old_backup" 2>/dev/null
+                print_info "Удалён старый бэкап: $old_backup"
             done
         fi
 
         # Создать новый бэкап
-        cp "$file" "$backup" || return 1
-        print_info "Резервная копия: $backup"
+        if cp "$file" "$backup" 2>/dev/null; then
+            print_success "Создан бэкап: $backup"
+            return 0
+        else
+            print_error "Не удалось создать бэкап: $backup"
+            return 1
+        fi
     fi
+    
+    # Файл не существует - это не ошибка, просто возвращаем 0
     return 0
 }
 
@@ -323,36 +377,70 @@ restore_backup() {
 }
 
 # Очистить старые бэкапы для файла
+# Эта функция удаляет старые резервные копии файлов, оставляя только указанное количество последних.
+# Бэкапы должны иметь формат: <имя_файла>.backup.YYYYMMDD_HHMMSS
+# Параметры:
+#   $1 - базовое имя файла, для которого чистим бэкапы (например /opt/etc/init.d/S99zapret2)
+#   $2 - количество последних бэкапов, которые нужно оставить (по умолчанию 5)
+# Возвращаемые значения:
+#   0 - очистка выполнена успешно или бэкапов нет
 cleanup_backups() {
     local file=$1
-    local keep=${2:-5}  # По умолчанию хранить 5 последних
+    local keep=${2:-5}  # По умолчанию хранить 5 последних бэкапов
 
+    # Найти все бэкапы, отсортированные по времени изменения (новые первыми)
+    # ls -t сортирует по времени модификации (новейшие файлы в начале)
     local all_backups
     all_backups=$(ls -t "${file}.backup."* 2>/dev/null)
 
+    # Если бэкапов нет - просто выходим
     if [ -z "$all_backups" ]; then
         print_info "Бэкапы не найдены для $file"
         return 0
     fi
 
+    # Посчитать общее количество найденных бэкапов
     local total_count
     total_count=$(echo "$all_backups" | wc -l)
 
+    # Если количество бэкапов меньше или равно keep - удалять ничего не нужно
     if [ "$total_count" -le "$keep" ]; then
-        print_info "Бэкапов: $total_count (в пределах нормы)"
+        print_info "Бэкапов: $total_count (в пределах нормы, храним последние $keep)"
         return 0
     fi
 
+    # Определить какие бэкапы удалить (все начиная с (keep+1)-го)
+    # tail -n +N выводит строки начиная с N-й
     local to_delete
     to_delete=$(echo "$all_backups" | tail -n +$((keep + 1)))
 
-    local deleted=0
+    # Удалить старые бэкапы и посчитать количество удалённых
+    # ВАЖНО: while в пайпе работает в подпроцессе, поэтому переменные внутри него
+    # не сохраняются после выхода из цикла. Используем временный файл для счётчика.
+    local temp_count_file
+    temp_count_file=$(mktemp)
+    echo "0" > "$temp_count_file"
+
     echo "$to_delete" | while read -r backup; do
-        rm -f "$backup" 2>/dev/null && deleted=$((deleted + 1))
+        if [ -n "$backup" ] && [ -f "$backup" ]; then
+            rm -f "$backup" 2>/dev/null
+            # Увеличить счётчик через файл (обход ограничения подпроцесса)
+            local count
+            count=$(cat "$temp_count_file")
+            echo $((count + 1)) > "$temp_count_file"
+        fi
     done
 
-    local remaining=$keep
-    print_success "Очищено бэкапов: $((total_count - remaining)), осталось: $remaining"
+    # Прочитать итоговое значение счётчика
+    local deleted
+    deleted=$(cat "$temp_count_file")
+    rm -f "$temp_count_file"
+
+    # Посчитать сколько бэкапов осталось
+    local remaining
+    remaining=$(ls -t "${file}.backup."* 2>/dev/null | wc -l)
+    
+    print_success "Очищено старых бэкапов: $deleted, осталось: $remaining"
     return 0
 }
 

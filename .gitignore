@@ -1,18 +1,43 @@
-# Local-only docs / agent config
-manual.en.md
-AGENTS.md
+```bash
+# Environment files
+.env
+.env.local
+*.env.*
 
-# Local tools and agent state
-tools/
-/.claude/
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
 
-# Local blockcheck logs
-discord_blockcheck2_tls13_20260123_130435.txt
-discord_blockcheck2_tls13_20260123_130949.txt
-discord_blockcheck2_tls13_20260123_131631.txt
+# Editors
+.vscode/
+.idea/
 
-# Local temp / Codex artifacts
-/%TEMP%/
-/%TEMP%*.txt
-/__codex_quarantine/
-/nul
+# System files
+.DS_Store
+Thumbs.db
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```

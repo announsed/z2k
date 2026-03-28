@@ -42,34 +42,37 @@ step_update_packages() {
     opkg_output=$(opkg update 2>&1)
     local exit_code=$?
 
-    # Показать вывод opkg
+    # Показать вывод opkg для отладки
     echo "$opkg_output"
 
     if [ "$exit_code" -eq 0 ]; then
-        print_success "Список пакетов обновлен"
+        print_success "Список пакетов обновлён успешно"
         return 0
     else
-        print_error "Не удалось обновить список пакетов (код: $exit_code)"
+        print_error "Не удалось обновить список пакетов (код ошибки: $exit_code)"
 
         # Проверка на Illegal instruction - типичная проблема на Keenetic из-за блокировки РКН
+        # или при установке Entware для неправильной архитектуры процессора
         if echo "$opkg_output" | grep -qi "illegal instruction"; then
             print_warning "Обнаружена ошибка 'Illegal instruction'"
-            print_info "Это часто связано с блокировкой РКН репозитория bin.entware.net"
+            print_info "Возможные причины:"
+            print_info "  1. Блокировка РКН репозитория bin.entware.net"
+            print_info "  2. Entware установлен для НЕПРАВИЛЬНОЙ архитектуры CPU"
             print_separator
 
             # Попытка переключения на альтернативное зеркало (метод от zapret4rocket)
             print_info "Попытка переключения на альтернативное зеркало Entware..."
 
             local current_mirror
-            current_mirror=$(grep -m1 "^src" /opt/etc/opkg.conf | awk '{print $3}' | grep -o 'bin.entware.net')
+            current_mirror=$(grep -m1 "^src" /opt/etc/opkg.conf 2>/dev/null | awk '{print $3}' | grep -o 'bin.entware.net')
 
             if [ -n "$current_mirror" ]; then
-                print_info "Меняю bin.entware.net → entware.diversion.ch"
+                print_info "Меняю зеркало: bin.entware.net → entware.diversion.ch"
 
-                # Создать backup конфига
-                cp /opt/etc/opkg.conf /opt/etc/opkg.conf.backup
+                # Создать backup конфига перед изменением
+                cp /opt/etc/opkg.conf /opt/etc/opkg.conf.backup.$(date +%Y%m%d_%H%M%S)
 
-                # Заменить зеркало
+                # Заменить зеркало в конфиге
                 sed -i 's|bin.entware.net|entware.diversion.ch|g' /opt/etc/opkg.conf
 
                 print_info "Повторная попытка обновления с новым зеркалом..."
@@ -81,23 +84,23 @@ step_update_packages() {
                 echo "$opkg_output"
 
                 if [ "$exit_code" -eq 0 ]; then
-                    print_success "Список пакетов обновлен через альтернативное зеркало!"
-                    print_info "Backup старого конфига: /opt/etc/opkg.conf.backup"
+                    print_success "Список пакетов обновлён через альтернативное зеркало!"
+                    print_info "Backup старого конфига сохранён"
                     return 0
                 else
-                    print_error "Не помогло - ошибка осталась"
+                    print_error "Альтернативное зеркало не помогло"
                     print_info "Восстанавливаю оригинальный конфиг..."
-                    mv /opt/etc/opkg.conf.backup /opt/etc/opkg.conf
+                    mv /opt/etc/opkg.conf.backup.* /opt/etc/opkg.conf 2>/dev/null || true
                 fi
             else
-                print_info "Зеркало bin.entware.net не найдено в конфиге"
+                print_info "Зеркало bin.entware.net не найдено в конфиге opkg"
             fi
 
             printf "\n"
         fi
 
-        # Диагностика причины ошибки
-        print_info "Углубленная диагностика проблемы..."
+        # Углубленная диагностика причины ошибки
+        print_info "Запуск углубленной диагностики проблемы..."
         print_separator
 
         # Анализ вывода opkg для определения точного места ошибки
@@ -221,8 +224,9 @@ EOF
    opkg update --verbosity=2 2>&1 | tee /tmp/opkg_debug.log
    (сохранит полный вывод в файл)
 
-3. Очистите кэш и попробуйте снова:
+3. Очистите кэш opkg и попробуйте снова:
    rm -rf /opt/var/opkg-lists/*
+   rm -f /opt/tmp/*.sig
    opkg update
 
 4. Проверьте место на диске:
@@ -245,12 +249,14 @@ EOF
 Проверьте результаты диагностики выше.
 
 Если репозиторий недоступен:
-- Проблемы с сетью, DNS или блокировка
-- Проверьте: curl -I http://bin.entware.net/
+- Проблемы с сетью, DNS или блокировка РКН
+- Проверьте вручную: curl -I http://bin.entware.net/
+- Попробуйте сменить DNS на 1.1.1.1 или 8.8.8.8
 
 Если другая проблема:
 - Попробуйте вручную: opkg update --verbosity=2
 - Проверьте логи: cat /opt/var/log/opkg.log
+- Очистите кэш: rm -rf /opt/var/opkg-lists/*
 
 ПРОДОЛЖИТЬ БЕЗ ОБНОВЛЕНИЯ?
 Установка продолжится с текущими пакетами.
@@ -262,13 +268,14 @@ EOF
 
         case "$answer" in
             [Nn]|[Nn][Oo])
-                print_info "Установка прервана"
-                print_info "Исправьте проблему и запустите снова"
+                print_info "Установка прервана пользователем"
+                print_info "Исправьте проблему с opkg и запустите установку снова"
                 return 1
                 ;;
             *)
                 print_warning "Продолжаем без обновления пакетов..."
-                print_info "Будет использована текущая локальная база пакетов"
+                print_info "Будет использована текущая локальная база пакетов opkg"
+                print_info "Если установка завершится ошибкой - сначала исправьте opkg"
                 return 0
                 ;;
         esac
@@ -347,37 +354,55 @@ unzip
 
     for pkg in $packages; do
         if opkg list-installed | grep -q "^${pkg} "; then
-            print_info "$pkg уже установлен"
+            print_success "$pkg уже установлен"
         else
             print_info "Установка $pkg..."
-            opkg install "$pkg" || print_warning "Не удалось установить $pkg"
+            if opkg install "$pkg"; then
+                print_success "$pkg установлен"
+            else
+                print_warning "Не удалось установить $pkg (возможно уже установлен или недоступен)"
+            fi
         fi
     done
 
     # Создать симлинки для библиотек (нужно для линковки)
     print_info "Создание симлинков библиотек..."
 
-    cd /opt/lib || return 1
+    local lib_dir="/opt/lib"
+    local original_dir="$PWD"  # Сохранить текущую директорию
+    
+    cd "$lib_dir" || {
+        print_error "Не удалось перейти в $lib_dir"
+        return 1
+    }
 
-    # libmnl
+    # libmnl - библиотека для работы с netlink (минимальный интерфейс)
+    # Создаёт симлинк libmnl.so -> libmnl.so.0 если он ещё не существует
     if [ ! -e libmnl.so ] && [ -e libmnl.so.0 ]; then
         ln -sf libmnl.so.0 libmnl.so
         print_info "Создан симлинк: libmnl.so -> libmnl.so.0"
     fi
 
-    # libnetfilter_queue
+    # libnetfilter_queue - библиотека для перехвата пакетов через NFQUEUE
+    # Создаёт симлинк libnetfilter_queue.so -> libnetfilter_queue.so.1
     if [ ! -e libnetfilter_queue.so ] && [ -e libnetfilter_queue.so.1 ]; then
         ln -sf libnetfilter_queue.so.1 libnetfilter_queue.so
         print_info "Создан симлинк: libnetfilter_queue.so -> libnetfilter_queue.so.1"
     fi
 
-    # libnfnetlink
+    # libnfnetlink - низкоуровневая библиотека для netlink
+    # Создаёт симлинк libnfnetlink.so -> libnfnetlink.so.0
     if [ ! -e libnfnetlink.so ] && [ -e libnfnetlink.so.0 ]; then
         ln -sf libnfnetlink.so.0 libnfnetlink.so
         print_info "Создан симлинк: libnfnetlink.so -> libnfnetlink.so.0"
     fi
 
-    cd - >/dev/null || return 1
+    # Вернуться в предыдущую директорию безопасным способом
+    # Используем сохранённую переменную вместо cd - который может не работать в sh
+    cd "$original_dir" || {
+        print_error "Не удалось вернуться в предыдущую директорию ($original_dir)"
+        return 1
+    }
 
     # =========================================================================
     # КРИТИЧНЫЕ ПАКЕТЫ ДЛЯ ZAPRET2 (из check_prerequisites_openwrt)
@@ -1481,7 +1506,8 @@ step_finalize() {
     # Запустить cron демон если есть init скрипт Entware
     local cron_init="/opt/etc/init.d/S10cron"
     if [ -x "$cron_init" ]; then
-        "$cron_init" start >/dev/null 2>&1
+        "$cron_init" restart >/dev/null 2>&1
+        sleep 1
         if pgrep -f "cron" >/dev/null 2>&1; then
             print_info "Cron демон запущен"
         else
@@ -1492,6 +1518,12 @@ step_finalize() {
     else
         print_warning "Cron демон не найден"
         print_info "Установите: opkg install cron"
+    fi
+    
+    # Проверка что cron действительно работает
+    if command -v pgrep >/dev/null 2>&1 && ! pgrep -f "cron" >/dev/null 2>&1; then
+        print_warning "Cron не запущен - автообновление не будет работать"
+        print_info "Попробуйте вручную: /opt/etc/init.d/S10cron start"
     fi
 
     # Показать итоговую информацию
