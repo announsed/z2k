@@ -19,8 +19,8 @@ export WORK_DIR
 export LIB_DIR
 export GITHUB_RAW
 
-# Список модулей для загрузки
-MODULES="utils system_init install strategies config config_official menu"
+# Список модулей для загрузки (добавлен telegram_proxy)
+MODULES="utils system_init install strategies config config_official menu telegram_proxy"
 
 # ==============================================================================
 # ВСТРОЕННЫЕ FALLBACK ФУНКЦИИ
@@ -134,19 +134,34 @@ z2k_map_arch_to_bin_arch() {
 check_environment() {
     print_info "Проверка окружения..."
 
-    # Проверка Entware
+    # Проверка Entware - системы управления пакетами для встраиваемых устройств
+    # Entware должен быть установлен в /opt и иметь исполняемый opkg
     if [ ! -d "/opt" ] || [ ! -x "/opt/bin/opkg" ]; then
         die "Entware не установлен! Установите Entware перед запуском z2k."
     fi
 
-    # Проверка curl
+    # Проверка curl - утилиты для загрузки файлов по HTTP/HTTPS
+    # curl необходим для загрузки модулей, стратегий и обновлений
     if ! command -v curl >/dev/null 2>&1; then
         print_info "curl не найден, устанавливаю..."
-        /opt/bin/opkg update || die "Не удалось обновить opkg"
-        /opt/bin/opkg install curl || die "Не удалось установить curl"
+        
+        # Использовать явный путь к opkg для надёжности
+        local opkg_bin="/opt/bin/opkg"
+        
+        # Обновить списки пакетов перед установкой
+        if ! "$opkg_bin" update; then
+            die "Не удалось обновить списки пакетов opkg. Проверьте подключение к интернету."
+        fi
+        
+        # Установить curl
+        if ! "$opkg_bin" install curl; then
+            die "Не удалось установить curl. Проверьте наличие места на диске."
+        fi
+        
+        print_success "curl успешно установлен"
     fi
 
-    # Проверка архитектуры
+    # Проверка архитектуры процессора для выбора правильных бинарников
     local arch entware_arch bin_arch
     entware_arch=$(z2k_detect_entware_arch)
     arch="${entware_arch:-$(uname -m)}"
@@ -171,24 +186,37 @@ check_environment() {
 download_modules() {
     print_info "Загрузка модулей z2k..."
 
-    # Создать директории
-    mkdir -p "$LIB_DIR" || die "Не удалось создать $LIB_DIR"
+    # Создать рабочую директорию для модулей
+    mkdir -p "$LIB_DIR" || die "Не удалось создать директорию $LIB_DIR"
 
-    # Скачать каждый модуль
+    # Скачать каждый модуль библиотеки с проверкой целостности
     for module in $MODULES; do
         local url="${GITHUB_RAW}/lib/${module}.sh"
         local output="${LIB_DIR}/${module}.sh"
 
         print_info "Загрузка lib/${module}.sh..."
 
-        if curl -fsSL "$url" -o "$output"; then
-            print_success "Загружен: ${module}.sh"
+        # Загрузить файл с таймаутами:
+        # --connect-timeout 10 - ждать соединения не более 10 секунд
+        # --max-time 60 - общее максимальное время выполнения 60 секунд
+        if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$output"; then
+            # Проверить что файл не пустой и содержит код (комментарии или функции)
+            # grep -q "^#\\|^[a-zA-Z_]" ищет строки начинающиеся с # или буквы/подчёркивания
+            if [ -s "$output" ] && grep -q "^#\|^[a-zA-Z_]" "$output"; then
+                print_success "Загружен: ${module}.sh ($(wc -l < "$output") строк)"
+            else
+                print_error "Файл ${module}.sh повреждён или пуст"
+                rm -f "$output"
+                die "Ошибка загрузки модуля: ${module}.sh"
+            fi
         else
+            print_error "Не удалось загрузить ${module}.sh"
+            print_info "Проверьте подключение к интернету и доступность GitHub"
             die "Ошибка загрузки модуля: ${module}.sh"
         fi
     done
 
-    print_success "Все модули загружены"
+    print_success "Все модули загружены успешно"
 }
 
 source_modules() {

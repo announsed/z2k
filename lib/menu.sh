@@ -75,11 +75,12 @@ MENU
 [W] Whitelist (исключения)
 [R] RST-фильтр (пассивный DPI)
 [S] Скрипты custom.d
+[T] Telegram прокси (MTProto)
 [0] Выход
 
 MENU
 
-        printf "Выберите опцию [0-5,A,R,W,S]: "
+        printf "Выберите опцию [0-5,A,R,W,S,T]: "
         read_input choice
 
         case "$choice" in
@@ -109,6 +110,15 @@ MENU
                 ;;
             s|S)
                 menu_custom_scripts
+                ;;
+            t|T)
+                # Интеграция с модулем telegram_proxy.sh
+                if command -v menu_telegram_proxy >/dev/null 2>&1; then
+                    menu_telegram_proxy
+                else
+                    print_error "Модуль telegram_proxy не загружен"
+                    pause
+                fi
                 ;;
             0)
                 print_info "Выход из меню"
