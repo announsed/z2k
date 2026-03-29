@@ -64,7 +64,8 @@ step_update_packages() {
             print_info "Попытка переключения на альтернативное зеркало Entware..."
 
             local current_mirror
-            current_mirror=$(grep -m1 "^src" /opt/etc/opkg.conf 2>/dev/null | awk '{print $3}' | grep -o 'bin.entware.net')
+            # Оптимизация: один awk вместо grep|awk|grep
+            current_mirror=$(awk '/^src/ {print $3; exit}' /opt/etc/opkg.conf 2>/dev/null | grep -o 'bin.entware.net')
 
             if [ -n "$current_mirror" ]; then
                 print_info "Меняю зеркало: bin.entware.net → entware.diversion.ch"
@@ -123,11 +124,13 @@ step_update_packages() {
         # 2. Проверка архитектуры Entware
         if [ -f "/opt/etc/opkg.conf" ]; then
             local entware_arch
-            entware_arch=$(grep -m1 "^arch" /opt/etc/opkg.conf | awk '{print $2}')
+            # Оптимизация: один awk вместо grep|awk
+            entware_arch=$(awk '/^arch/ {print $2; exit}' /opt/etc/opkg.conf)
             print_info "Архитектура Entware: ${entware_arch:-не определена}"
 
             local repo_url
-            repo_url=$(grep -m1 "^src" /opt/etc/opkg.conf | awk '{print $3}')
+            # Оптимизация: один awk вместо grep|awk
+            repo_url=$(awk '/^src/ {print $3; exit}' /opt/etc/opkg.conf)
             print_info "Репозиторий: $repo_url"
 
             # 3. Проверка доступности репозитория
@@ -952,24 +955,26 @@ ${ZAPRET2_DIR}/binaries
         print_warning "[FAIL] mdig не найден (необязательный)"
     fi
 
-    # Посчитать компоненты
+    # Посчитать компоненты (оптимизация: один find с awk вместо 3-х отдельных find|wc -l)
     print_info "Статистика компонентов:"
+
+    local lua_count=0 fake_count=0 common_count=0
 
     # Lua файлы
     if [ -d "${ZAPRET2_DIR}/lua" ]; then
-        local lua_count=$(find "${ZAPRET2_DIR}/lua" -name "*.lua" 2>/dev/null | wc -l)
+        lua_count=$(find "${ZAPRET2_DIR}/lua" -name "*.lua" 2>/dev/null | wc -l)
         print_info "  - Lua файлов: $lua_count"
     fi
 
     # Fake файлы
     if [ -d "${ZAPRET2_DIR}/files/fake" ]; then
-        local fake_count=$(find "${ZAPRET2_DIR}/files/fake" -name "*.bin" 2>/dev/null | wc -l)
+        fake_count=$(find "${ZAPRET2_DIR}/files/fake" -name "*.bin" 2>/dev/null | wc -l)
         print_info "  - Fake файлов: $fake_count"
     fi
 
     # Модули common/
     if [ -d "${ZAPRET2_DIR}/common" ]; then
-        local common_count=$(find "${ZAPRET2_DIR}/common" -name "*.sh" 2>/dev/null | wc -l)
+        common_count=$(find "${ZAPRET2_DIR}/common" -name "*.sh" 2>/dev/null | wc -l)
         print_info "  - Модули common/: $common_count"
     fi
 

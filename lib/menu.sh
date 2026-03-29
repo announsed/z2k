@@ -184,9 +184,12 @@ menu_select_strategy() {
     local current_rkn="1"
 
     if [ -f "$config_file" ]; then
-        current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        # Оптимизация: один awk вместо grep|cut для каждого параметра
+        eval "$(awk -F: '
+            /^youtube_tcp:/ { print "current_yt_tcp=\"" $2 "\"" }
+            /^youtube_gv:/ { print "current_yt_gv=\"" $2 "\"" }
+            /^rkn:/ { print "current_rkn=\"" $2 "\"" }
+        ' "$config_file" 2>/dev/null)"
         [ -z "$current_yt_tcp" ] && current_yt_tcp="1"
         [ -z "$current_yt_gv" ] && current_yt_gv="1"
         [ -z "$current_rkn" ] && current_rkn="1"
@@ -1212,9 +1215,12 @@ menu_select_quic_strategy_youtube() {
     local current_rkn=1
 
     if [ -f "$config_file" ]; then
-        current_yt_tcp=$(grep "^youtube_tcp:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        current_yt_gv=$(grep "^youtube_gv:" "$config_file" 2>/dev/null | cut -d':' -f2)
-        current_rkn=$(grep "^rkn:" "$config_file" 2>/dev/null | cut -d':' -f2)
+        # Оптимизация: один awk вместо grep|cut для каждого параметра
+        eval "$(awk -F: '
+            /^youtube_tcp:/ { print "current_yt_tcp=\"" $2 "\"" }
+            /^youtube_gv:/ { print "current_yt_gv=\"" $2 "\"" }
+            /^rkn:/ { print "current_rkn=\"" $2 "\"" }
+        ' "$config_file" 2>/dev/null)"
         [ -z "$current_yt_tcp" ] && current_yt_tcp=1
         [ -z "$current_yt_gv" ] && current_yt_gv=1
         [ -z "$current_rkn" ] && current_rkn=1

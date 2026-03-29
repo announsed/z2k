@@ -588,20 +588,26 @@ tg_parse_proxy_list() {
     # Очистить кэш файл
     > "$TG_PROXY_CACHE_FILE"
     
-    # Извлечь ссылки tg://proxy?... из секций "Быстрые" и "Белые"
-    # Используем grep для извлечения ссылок
-    echo "$html_content" | grep -oE 'tg://proxy\?[^"'\''<>[:space:]]+' | while read -r line; do
-        # Извлечь параметры из ссылки
-        local server port secret
-        
-        server=$(echo "$line" | grep -oE 'server=[^&]+' | cut -d'=' -f2)
-        port=$(echo "$line" | grep -oE 'port=[^&]+' | cut -d'=' -f2)
-        secret=$(echo "$line" | grep -oE 'secret=[^&]+' | cut -d'=' -f2)
-        
-        if [ -n "$server" ] && [ -n "$port" ]; then
-            echo "${server}:${port}:${secret:-none}" >> "$TG_PROXY_CACHE_FILE"
-        fi
-    done
+    # Извлечь ссылки tg://proxy?... и распарсить одним awk (оптимизация: вместо 9 команд на строку - 1 awk)
+    local proxy_lines
+    proxy_lines=$(printf '%s\n' "$html_content" | grep -oE 'tg://proxy\?[^"'\'<>[:space:]]+')
+    
+    if [ -n "$proxy_lines" ]; then
+        printf '%s\n' "$proxy_lines" | awk 'BEGIN { FS="[?&]" }
+        {
+            server=""; port=""; secret=""
+            for (i=2; i<=NF; i++) {
+                split($i, kv, "=")
+                if (kv[1] == "server") server = kv[2]
+                else if (kv[1] == "port") port = kv[2]
+                else if (kv[1] == "secret") secret = kv[2]
+            }
+            if (server != "" && port != "") {
+                if (secret == "") secret = "none"
+                print server":"port":"secret
+            }
+        }' >> "$TG_PROXY_CACHE_FILE"
+    fi
     
     local count
     count=$(wc -l < "$TG_PROXY_CACHE_FILE" 2>/dev/null | tr -d ' ')
@@ -899,18 +905,21 @@ tg_disable_auto_update() {
 # ==============================================================================
 
 # Разрешение доменов Telegram в IP адреса и добавление в ipset
+# Разрешение доменов Telegram в IP адреса и добавление в ipset
 tg_resolve_and_add_to_ipset() {
     local set_name="telegram_domains"
-    
+
     print_info "Разрешение доменов Telegram в IP адреса..."
-    
-    local resolved_count=0
-    local failed_count=0
-    
+
+    # Использовать временный файл для подсчёта (обход subshell)
+    local temp_count_file
+    temp_count_file=$(mktemp)
+    echo "0:0" > "$temp_count_file"
+
     # Пройтись по всем доменам
     for domain in $TELEGRAM_DOMAINS; do
         [ -z "$domain" ] && continue
-        
+
         # Разрешить домен через nslookup или getent
         local ip_addresses
         if tg_check_command nslookup; then
@@ -921,26 +930,43 @@ tg_resolve_and_add_to_ipset() {
             # Попытаться через ping (альтернатива)
             ip_addresses=$(ping -c 1 "$domain" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
         fi
-        
+
         if [ -n "$ip_addresses" ]; then
-            # Добавить каждый IP в ipset
-            echo "$ip_addresses" | while read -r ip; do
+            # Добавить каждый IP в ipset (используем here-string вместо pipe)
+            while IFS= read -r ip; do
                 [ -z "$ip" ] && continue
                 if ipset add "$set_name" "$ip" 2>/dev/null; then
-                    resolved_count=$((resolved_count + 1))
+                    # Обновить счётчик через файл
+                    local counts cur_resolved cur_failed
+                    counts=$(cat "$temp_count_file")
+                    cur_resolved=${counts%%:*}
+                    cur_failed=${counts##*:}
+                    echo "$((cur_resolved + 1)):$cur_failed" > "$temp_count_file"
                 fi
-            done
+            done <<< "$ip_addresses"
         else
-            failed_count=$((failed_count + 1))
+            # Обновить счётчик неудач
+            local counts cur_resolved cur_failed
+            counts=$(cat "$temp_count_file")
+            cur_resolved=${counts%%:*}
+            cur_failed=${counts##*:}
+            echo "$cur_resolved:$((cur_failed + 1))" > "$temp_count_file"
             tg_log "WARNING: Не удалось разрешить домен: $domain"
         fi
     done
-    
-    print_success "Добавлено IP адресов в ipset: $resolved_count"
-    if [ "$failed_count" -gt 0 ]; then
-        print_warning "Не удалось разрешить доменов: $failed_count"
+
+    # Прочитать итоговые значения
+    local final_counts resolved failed
+    final_counts=$(cat "$temp_count_file")
+    resolved=${final_counts%%:*}
+    failed=${final_counts##*:}
+    rm -f "$temp_count_file"
+
+    print_success "Добавлено IP адресов в ipset: $resolved"
+    if [ "$failed" -gt 0 ]; then
+        print_warning "Не удалось разрешить доменов: $failed"
     fi
-    
+
     return 0
 }
 
