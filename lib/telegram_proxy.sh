@@ -1,32 +1,59 @@
 #!/bin/sh
-# lib/telegram_proxy.sh - Модуль управления MTProto прокси для Telegram
-# Часть z2k v2.0 - Прозрачное проксирование трафика Telegram через MTProto
-# 
-# Этот модуль обеспечивает:
-# - Автоматический парсинг рабочих прокси из внешнего источника
-# - Проверку доступности и скорости прокси
-# - Настройку прозрачного проксирования через iptables
-# - Автоматическое обновление прокси по расписанию
-# - Управление через интерактивное меню
+# lib/telegram_proxy.sh - Модуль управления MTProto прокси для Telegram через XKeen/Xray
+# Часть z2k v2.0 - Прозрачное проксирование трафика Telegram через автоматический выбор рабочих прокси
+#
+# АРХИТЕКТУРА РЕШЕНИЯ:
+# ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐     ┌──────────────┐
+# │  Клиенты Wi-Fi  │────▶│ Keenetic (Xray) │────▶│ MTProto Upstream │────▶│  Telegram    │
+# │  (без настройки)│     │ порт 443      │     │ (из списка)     │     │  серверы     │
+# └─────────────────┘     └──────────────┘     └─────────────────┘     └──────────────┘
+#
+# Xray выступает в двух ролях:
+# 1. Сервер MTProto - принимает подключения от клиентов Telegram на порту 443 (прозрачно)
+# 2. Клиент MTProto - подключается к выбранному внешнему прокси (upstream) и передаёт трафик
+#
+# Скрипт автоматически:
+# - Парсит список прокси с https://storage.yandexcloud.net/ocean/mossad/tg.html
+# - Проверяет скорость и работоспособность каждого прокси
+# - Выбирает лучший и обновляет конфигурацию Xray
+# - Перезапускает Xray для применения изменений
+# - Запускается по расписанию через cron (каждый час по умолчанию)
 
 # ==============================================================================
-# КОНСТАНТЫ И ПЕРЕМЕННЫЕ
+# КОНСТАНТЫ И НАСТРОЙКИ
 # ==============================================================================
 
-# URL источника прокси (Yandex Cloud storage)
+# URL источника MTProto прокси
 TG_PROXY_SOURCE_URL="https://storage.yandexcloud.net/ocean/mossad/tg.html"
 
-# Файлы конфигурации
-TG_PROXY_CONFIG_DIR="${CONFIG_DIR}/telegram_proxy"
-TG_PROXY_CONFIG_FILE="${TG_PROXY_CONFIG_DIR}/proxy.conf"
-TG_PROXY_CACHE_FILE="${TG_PROXY_CONFIG_DIR}/proxy_cache.txt"
-TG_PROXY_SCRIPT_DIR="${ZAPRET2_DIR}/telegram_proxy"
-TG_PROXY_UPDATE_SCRIPT="${TG_PROXY_SCRIPT_DIR}/update_proxy.sh"
-TG_PROXY_CHECK_SCRIPT="${TG_PROXY_SCRIPT_DIR}/check_proxy.sh"
+# Пути установки XKeen/Xray
+XKEEN_BIN="/opt/sbin/xkeen"
+XRAY_BIN="/opt/bin/xray"
+XRAY_CONFIG_DIR="/opt/etc/xray/configs"
+XRAY_MAIN_CONFIG="/opt/etc/xray/config.json"
+XRAY_MTPROTO_CONFIG="${XRAY_CONFIG_DIR}/05_mtproto.json"
 
-# Список доменов Telegram для проксирования
-# Все официальные домены Telegram и связанные сервисы
-TG_DOMAINS="
+# Файлы для хранения данных
+TG_PROXY_CACHE_FILE="/tmp/tg_proxy_cache.txt"
+TG_PROXY_LOG_FILE="/opt/var/log/tg_proxy.log"
+
+# Определить CONFIG_DIR если не задан (для автономного запуска из cron)
+if [ -z "$CONFIG_DIR" ]; then
+    # Попробовать определить из окружения z2k
+    if [ -f /opt/etc/zapret2/config ]; then
+        CONFIG_DIR="/opt/etc/zapret2"
+    elif [ -f /opt/etc/init.d/S99zapret2 ]; then
+        CONFIG_DIR="/opt/etc/zapret2"
+    else
+        CONFIG_DIR="/opt/etc/zapret2"
+    fi
+fi
+
+TG_PROXY_SECRET_FILE="${CONFIG_DIR}/tg_proxy_secret"
+TG_PROXY_SETTINGS_FILE="${CONFIG_DIR}/tg_proxy_settings.conf"
+
+# Список доменов Telegram для проксирования (через ipset)
+TELEGRAM_DOMAINS="
 t.me
 tg.dev
 tg.org
@@ -83,648 +110,1051 @@ torg.org
 web.telegram.org
 "
 
-# Экспортировать переменные
-export TG_PROXY_CONFIG_DIR
-export TG_PROXY_CONFIG_FILE
-export TG_PROXY_CACHE_FILE
-export TG_PROXY_SCRIPT_DIR
-export TG_PROXY_UPDATE_SCRIPT
-export TG_PROXY_CHECK_SCRIPT
-export TG_PROXY_SOURCE_URL
+# Интервал автообновления прокси (в часах)
+DEFAULT_PROXY_UPDATE_INTERVAL=1
 
 # ==============================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==============================================================================
 
-# Парсинг прокси из HTML страницы
-# Извлекает данные из JavaScript массива proxies в HTML
-# Возвращает формат: server:port:secret
-parse_proxies_from_html() {
-    local html_file=$1
-    
-    if [ ! -f "$html_file" ]; then
-        print_error "Файл не найден: $html_file"
-        return 1
-    fi
-    
-    # Извлечь строки с данными прокси из JavaScript
-    # Формат: { server: '...', port: '...', secret: '...', name: '...' }
-    grep -oE "\{[^}]*server[^}]*\}" "$html_file" 2>/dev/null | while read -r line; do
-        # Извлечь server
-        local server
-        server=$(echo "$line" | grep -oE "server:[[:space:]]*'[^']*'" | sed "s/server:[[:space:]]*'//; s/'$//")
-        
-        # Извлечь port
-        local port
-        port=$(echo "$line" | grep -oE "port:[[:space:]]*'[0-9]*'" | sed "s/port:[[:space:]]*'//; s/'$//")
-        
-        # Извлечь secret
-        local secret
-        secret=$(echo "$line" | grep -oE "secret:[[:space:]]*'[^']*'" | sed "s/secret:[[:space:]]*'//; s/'$//")
-        
-        # Если все поля найдены - вывести в формате server:port:secret
-        if [ -n "$server" ] && [ -n "$port" ] && [ -n "$secret" ]; then
-            echo "${server}:${port}:${secret}"
-        fi
-    done
-}
-
-# Загрузить список прокси из источника
-# Загружает HTML страницу и парсит прокси
-load_proxy_list() {
-    print_info "Загрузка списка прокси из источника..."
-    
-    local temp_html="/tmp/tg_proxy_${$}.html"
-    
-    # Загрузить HTML с таймаутами
-    if curl -fsSL --connect-timeout 10 --max-time 30 "$TG_PROXY_SOURCE_URL" -o "$temp_html" 2>/dev/null; then
-        if [ -s "$temp_html" ]; then
-            # Распарсить прокси и сохранить в кэш
-            parse_proxies_from_html "$temp_html" > "$TG_PROXY_CACHE_FILE"
-            
-            local count
-            count=$(wc -l < "$TG_PROXY_CACHE_FILE")
-            
-            if [ "$count" -gt 0 ]; then
-                print_success "Загружено прокси: $count"
-                rm -f "$temp_html"
-                return 0
-            else
-                print_error "Не удалось распарсить прокси из HTML"
-                rm -f "$temp_html"
-                return 1
-            fi
-        else
-            print_error "Загруженный файл пуст"
-            rm -f "$temp_html"
-            return 1
-        fi
-    else
-        print_error "Не удалось загрузить список прокси"
-        print_info "Проверьте подключение к интернету"
-        rm -f "$temp_html"
-        return 1
+# Логирование в файл
+tg_log() {
+    local timestamp
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    echo "[$timestamp] $*" >> "$TG_PROXY_LOG_FILE"
+    # Дублировать важные сообщения в консоль если это не cron
+    if [ -t 1 ]; then
+        echo "$*"
     fi
 }
 
-# Проверка работоспособности прокси
-# Пытается подключиться к прокси и измеряет время отклика
-# Параметры: $1 - server:port:secret
-# Возвращает: 0 если прокси работает, 1 если нет
-check_proxy_speed() {
-    local proxy=$1
-    local server port secret
+# Проверка наличия команды
+tg_check_command() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Проверка наличия пакета в opkg
+tg_is_package_installed() {
+    opkg list-installed 2>/dev/null | grep -q "^$1 "
+}
+
+# ==============================================================================
+# ПРОВЕРКА ТРЕБОВАНИЙ К СИСТЕМЕ
+# ==============================================================================
+
+# Проверка доступной оперативной памяти (требуется минимум 256 МБ для Xray)
+tg_check_memory() {
+    local total_mem_kb
     
-    # Разобрать строку прокси
-    server=$(echo "$proxy" | cut -d':' -f1)
-    port=$(echo "$proxy" | cut -d':' -f2)
-    secret=$(echo "$proxy" | cut -d':' -f3-)
-    
-    if [ -z "$server" ] || [ -z "$port" ] || [ -z "$secret" ]; then
-        return 1
+    # Попробовать получить из /proc/meminfo
+    if [ -f /proc/meminfo ]; then
+        total_mem_kb=$(grep "^MemTotal:" /proc/meminfo | awk '{print $2}')
+    else
+        # Альтернативный способ через free
+        total_mem_kb=$(free 2>/dev/null | awk '/^Mem:/ {print $2}')
     fi
     
-    # Проверка доступности сервера (ping по TCP)
-    # Используем timeout и nc (netcat) если доступен
-    local timeout_sec=5
-    
-    if command -v nc >/dev/null 2>&1; then
-        # netcat доступен - используем его для проверки TCP соединения
-        if timeout "$timeout_sec" nc -z "$server" "$port" 2>/dev/null; then
-            return 0
-        else
-            return 1
-        fi
-    elif command -v telnet >/dev/null 2>&1; then
-        # telnet как запасной вариант
-        if echo "" | timeout "$timeout_sec" telnet "$server" "$port" 2>/dev/null | grep -q "Connected"; then
-            return 0
-        else
-            return 1
-        fi
-    else
-        # Если нет ни nc ни telnet - считаем прокси рабочим по умолчанию
-        # Это позволит продолжить установку даже без инструментов проверки
-        print_warning "nc/telnet не доступны, проверка упрощена"
+    if [ -z "$total_mem_kb" ]; then
+        tg_log "WARNING: Не удалось определить объем оперативной памяти"
         return 0
     fi
+    
+    local total_mem_mb=$((total_mem_kb / 1024))
+    
+    if [ "$total_mem_mb" -lt 256 ]; then
+        tg_log "WARNING: Мало оперативной памяти (${total_mem_mb} МБ). Xray может работать нестабильно."
+        print_warning "Мало ОЗУ: ${total_mem_mb} МБ (требуется минимум 256 МБ)"
+        print_info "Xray может потреблять 100-200 МБ RAM"
+        return 1
+    fi
+    
+    print_success "Достаточно ОЗУ: ${total_mem_mb} МБ"
+    return 0
 }
 
-# Выбрать лучший прокси из списка
-# Проверяет каждый прокси и выбирает первый рабочий
-select_best_proxy() {
-    if [ ! -f "$TG_PROXY_CACHE_FILE" ] || [ ! -s "$TG_PROXY_CACHE_FILE" ]; then
-        print_error "Кэш прокси пуст или не найден"
+# Проверка свободной постоянной памяти (требуется минимум 50 МБ)
+tg_check_storage() {
+    local free_space_kb
+    
+    # Получить свободное место на /opt
+    free_space_kb=$(df -k /opt 2>/dev/null | awk 'NR==2 {print $4}')
+    
+    if [ -z "$free_space_kb" ]; then
+        tg_log "WARNING: Не удалось определить свободное место на диске"
+        return 0
+    fi
+    
+    local free_space_mb=$((free_space_kb / 1024))
+    
+    if [ "$free_space_mb" -lt 50 ]; then
+        tg_log "WARNING: Мало свободного места (${free_space_mb} МБ)"
+        print_warning "Мало места на диске: ${free_space_mb} МБ (требуется минимум 50 МБ)"
+        return 1
+    fi
+    
+    print_success "Достаточно места: ${free_space_mb} МБ"
+    return 0
+}
+
+# ==============================================================================
+# УСТАНОВКА XKEEN/XRAY
+# ==============================================================================
+
+# Установка зависимостей для XKeen
+tg_install_dependencies() {
+    print_header "Установка зависимостей для XKeen"
+    
+    local packages="curl tar"
+    local missing_packages=""
+    
+    for pkg in $packages; do
+        if ! tg_is_package_installed "$pkg"; then
+            missing_packages="$missing_packages $pkg"
+        else
+            print_success "$pkg уже установлен"
+        fi
+    done
+    
+    if [ -n "$missing_packages" ]; then
+        print_info "Установка пакетов:$missing_packages"
+        
+        # Обновить списки пакетов
+        print_info "Обновление списков пакетов..."
+        if ! opkg update; then
+            print_error "Не удалось обновить списки пакетов"
+            print_info "Продолжить без обновления? [y/N]: "
+            read -r answer </dev/tty
+            case "$answer" in
+                [Yy]*) ;;
+                *) return 1 ;;
+            esac
+        fi
+        
+        # Установить пакеты
+        for pkg in $missing_packages; do
+            print_info "Установка $pkg..."
+            if opkg install "$pkg"; then
+                print_success "$pkg установлен"
+            else
+                print_error "Не удалось установить $pkg"
+                return 1
+            fi
+        done
+    fi
+    
+    return 0
+}
+
+# Установка XKeen
+tg_install_xkeen() {
+    print_header "Установка XKeen"
+    
+    # Проверить наличие xkeen
+    if [ -x "$XKEEN_BIN" ]; then
+        print_success "XKeen уже установлен: $XKEEN_BIN"
+        return 0
+    fi
+    
+    print_info "Загрузка XKeen..."
+    
+    # Скачать последнюю версию XKeen
+    local xkeen_tar="/tmp/xkeen.tar"
+    
+    if curl -fsSL --connect-timeout 10 --max-time 120 \
+        "https://github.com/jameszeroX/XKeen/releases/latest/download/xkeen.tar" \
+        -o "$xkeen_tar"; then
+        
+        print_success "XKeen загружен"
+        
+        # Распаковать в /opt/sbin
+        print_info "Распаковка в /opt/sbin..."
+        if tar -xvf "$xkeen_tar" -C /opt/sbin --overwrite >/dev/null 2>&1; then
+            print_success "XKeen распакован"
+            
+            # Удалить архив
+            rm -f "$xkeen_tar"
+            
+            # Сделать исполняемым
+            chmod +x "$XKEEN_BIN" 2>/dev/null
+            
+            print_success "XKeen успешно установлен"
+            return 0
+        else
+            print_error "Ошибка распаковки XKeen"
+            rm -f "$xkeen_tar"
+            return 1
+        fi
+    else
+        print_error "Не удалось загрузить XKeen"
+        print_info "Проверьте подключение к интернету"
+        rm -f "$xkeen_tar"
+        return 1
+    fi
+}
+
+# Инициализация XKeen (первый запуск с выбором GeoIP/GeoSite)
+tg_init_xkeen() {
+    print_header "Инициализация XKeen"
+    
+    # Проверить есть ли уже конфиги
+    if [ -f "$XRAY_MAIN_CONFIG" ]; then
+        print_success "Конфигурация Xray уже существует"
+        return 0
+    fi
+    
+    print_info "Первичная инициализация XKeen..."
+    print_info "Вам будет предложено выбрать источники GeoIP и GeoSite"
+    print_info "Рекомендуется выбрать Re:filter или V2Fly для категории telegram"
+    print_separator
+    
+    # Запустить интерактивную установку
+    if "$XKEEN_BIN" -i; then
+        print_success "XKeen успешно инициализирован"
+        return 0
+    else
+        print_error "Ошибка инициализации XKeen"
+        print_info "Попробуйте запустить вручную: xkeen -i"
+        return 1
+    fi
+}
+
+# Проверка статуса Xray
+tg_check_xray_status() {
+    if [ -x "$XKEEN_BIN" ]; then
+        "$XKEEN_BIN" -status 2>&1
+        return $?
+    elif [ -x "$XRAY_BIN" ]; then
+        # Проверить процесс
+        if pgrep -f "xray" >/dev/null 2>&1; then
+            print_success "Xray запущен"
+            return 0
+        else
+            print_warning "Xray не запущен"
+            return 1
+        fi
+    else
+        print_error "Xray не найден"
+        return 1
+    fi
+}
+
+# Старт/Стоп/Рестарт Xray
+tg_control_xray() {
+    local action="$1"
+    
+    if [ -x "$XKEEN_BIN" ]; then
+        case "$action" in
+            start)
+                "$XKEEN_BIN" -start
+                ;;
+            stop)
+                "$XKEEN_BIN" -stop
+                ;;
+            restart)
+                "$XKEEN_BIN" -restart
+                ;;
+            status)
+                "$XKEEN_BIN" -status
+                ;;
+        esac
+        return $?
+    elif [ -x "/opt/etc/init.d/S99xray" ]; then
+        "/opt/etc/init.d/S99xray" "$action"
+        return $?
+    else
+        print_error "Скрипт управления Xray не найден"
+        return 1
+    fi
+}
+
+# ==============================================================================
+# ГЕНЕРАЦИЯ СЕКРЕТА MTProto
+# ==============================================================================
+
+# Генерация нового секрета для MTProto (32 символа в hex)
+tg_generate_secret() {
+    local secret
+    
+    # Попробовать openssl
+    if tg_check_command openssl; then
+        secret=$(openssl rand -hex 16 2>/dev/null)
+    fi
+    
+    # Если openssl не сработал, использовать /dev/urandom
+    if [ -z "$secret" ] && [ -r /dev/urandom ]; then
+        secret=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    fi
+    
+    # Последняя попытка - использовать случайные данные
+    if [ -z "$secret" ]; then
+        secret=$(date +%s%N | md5sum 2>/dev/null | cut -c1-32)
+    fi
+    
+    if [ -n "$secret" ] && [ ${#secret} -ge 32 ]; then
+        echo "$secret" | cut -c1-32
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Получить или создать секрет
+tg_get_or_create_secret() {
+    # Если секрет уже есть в файле, вернуть его
+    if [ -f "$TG_PROXY_SECRET_FILE" ]; then
+        cat "$TG_PROXY_SECRET_FILE"
+        return 0
+    fi
+    
+    # Сгенерировать новый секрет
+    local secret
+    secret=$(tg_generate_secret)
+    
+    if [ -n "$secret" ]; then
+        echo "$secret" > "$TG_PROXY_SECRET_FILE"
+        chmod 600 "$TG_PROXY_SECRET_FILE"
+        echo "$secret"
+        return 0
+    fi
+    
+    return 1
+}
+
+# ==============================================================================
+# СОЗДАНИЕ КОНФИГУРАЦИИ MTProto
+# ==============================================================================
+
+# Создание конфига MTProto для Xray
+tg_create_mtproto_config() {
+    print_header "Создание конфигурации MTProto"
+    
+    # Создать директорию для конфигов если нет
+    mkdir -p "$XRAY_CONFIG_DIR" || {
+        print_error "Не удалось создать директорию $XRAY_CONFIG_DIR"
+        return 1
+    }
+    
+    # Получить или создать секрет
+    local secret
+    secret=$(tg_get_or_create_secret)
+    
+    if [ -z "$secret" ]; then
+        print_error "Не удалось сгенерировать секрет MTProto"
+        return 1
+    fi
+    
+    print_info "Секрет MTProto: $secret"
+    print_info "(сохранён в $TG_PROXY_SECRET_FILE)"
+    
+    # Создать конфиг MTProto
+    cat > "$XRAY_MTPROTO_CONFIG" << EOF
+{
+  "inbounds": [
+    {
+      "tag": "telegram-in",
+      "port": 443,
+      "protocol": "mtproto",
+      "settings": {
+        "users": [
+          {
+            "secret": "${secret}"
+          }
+        ]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "telegram-out-direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "telegram-out-upstream",
+      "protocol": "mtproto",
+      "settings": {},
+      "streamSettings": {
+        "sockopt": {
+          "proxy": "socks5://0.0.0.0:0"
+        }
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["telegram-in"],
+        "outboundTag": "telegram-out-upstream"
+      }
+    ]
+  }
+}
+EOF
+    
+    if [ -f "$XRAY_MTPROTO_CONFIG" ]; then
+        print_success "Конфигурация создана: $XRAY_MTPROTO_CONFIG"
+        return 0
+    else
+        print_error "Не удалось создать конфигурацию"
+        return 1
+    fi
+}
+
+# Обновление upstream прокси в конфиге
+tg_update_upstream_proxy() {
+    local server="$1"
+    local port="$2"
+    
+    if [ -z "$server" ] || [ -z "$port" ]; then
+        tg_log "ERROR: Не указаны server или port"
+        return 1
+    fi
+    
+    if [ ! -f "$XRAY_MTPROTO_CONFIG" ]; then
+        tg_log "ERROR: Конфиг MTProto не найден: $XRAY_MTPROTO_CONFIG"
+        return 1
+    fi
+    
+    # Обновить строку proxy в конфиге
+    local old_proxy_pattern='"proxy": "socks5://[^"]*"'
+    local new_proxy="\"proxy\": \"socks5://${server}:${port}\""
+    
+    # Использовать sed для замены
+    if sed -i "s|${old_proxy_pattern}|${new_proxy}|" "$XRAY_MTPROTO_CONFIG" 2>/dev/null; then
+        tg_log "INFO: Upstream обновлён: ${server}:${port}"
+        return 0
+    else
+        # Альтернативный способ замены (если sed -i не работает)
+        local temp_file="/tmp/mtproto_config.tmp"
+        if sed "s|${old_proxy_pattern}|${new_proxy}|" "$XRAY_MTPROTO_CONFIG" > "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$XRAY_MTPROTO_CONFIG"
+            tg_log "INFO: Upstream обновлён: ${server}:${port}"
+            return 0
+        else
+            tg_log "ERROR: Не удалось обновить конфиг"
+            return 1
+        fi
+    fi
+}
+
+# ==============================================================================
+# ПАРСИНГ И ПРОВЕРКА ПРОКСИ
+# ==============================================================================
+
+# Парсинг списка прокси из источника
+tg_parse_proxy_list() {
+    print_info "Парсинг списка прокси из: $TG_PROXY_SOURCE_URL"
+    
+    # Загрузить страницу
+    local html_content
+    html_content=$(curl -fsSL --connect-timeout 10 --max-time 30 "$TG_PROXY_SOURCE_URL" 2>/dev/null)
+    
+    if [ -z "$html_content" ]; then
+        tg_log "ERROR: Не удалось загрузить страницу с прокси"
+        return 1
+    fi
+    
+    # Очистить кэш файл
+    > "$TG_PROXY_CACHE_FILE"
+    
+    # Извлечь ссылки tg://proxy?... из секций "Быстрые" и "Белые"
+    # Используем grep для извлечения ссылок
+    echo "$html_content" | grep -oE 'tg://proxy\?[^"'\''<>[:space:]]+' | while read -r line; do
+        # Извлечь параметры из ссылки
+        local server port secret
+        
+        server=$(echo "$line" | grep -oE 'server=[^&]+' | cut -d'=' -f2)
+        port=$(echo "$line" | grep -oE 'port=[^&]+' | cut -d'=' -f2)
+        secret=$(echo "$line" | grep -oE 'secret=[^&]+' | cut -d'=' -f2)
+        
+        if [ -n "$server" ] && [ -n "$port" ]; then
+            echo "${server}:${port}:${secret:-none}" >> "$TG_PROXY_CACHE_FILE"
+        fi
+    done
+    
+    local count
+    count=$(wc -l < "$TG_PROXY_CACHE_FILE" 2>/dev/null | tr -d ' ')
+    
+    if [ "$count" -gt 0 ]; then
+        print_success "Найдено прокси: $count"
+        tg_log "INFO: Найдено прокси: $count"
+        return 0
+    else
+        print_warning "Прокси не найдены"
+        tg_log "WARNING: Прокси не найдены в источнике"
+        return 1
+    fi
+}
+
+# Проверка работоспособности прокси через nc (netcat)
+tg_check_proxy_nc() {
+    local server="$1"
+    local port="$2"
+    local timeout="${3:-3}"
+    
+    # Проверить доступность порта через nc
+    if tg_check_command nc; then
+        if nc -z -w "$timeout" "$server" "$port" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    
+    # Альтернатива через timeout и /dev/tcp (если поддерживается shell)
+    if (echo >/dev/tcp/"$server"/"$port") 2>/dev/null; then
+        return 0
+    fi
+    
+    return 1
+}
+
+# Проверка прокси через curl с SOCKS5
+tg_check_proxy_curl() {
+    local server="$1"
+    local port="$2"
+    local timeout="${3:-5}"
+    
+    # Попытаться подключиться через SOCKS5
+    if curl -s --socks5 "${server}:${port}" \
+        --connect-timeout "$timeout" \
+        --max-time "$((timeout * 2))" \
+        "https://t.me/" >/dev/null 2>&1; then
+        return 0
+    fi
+    
+    return 1
+}
+
+# Комплексная проверка прокси
+tg_verify_proxy() {
+    local server="$1"
+    local port="$2"
+    
+    # Сначала быстрая проверка доступности порта
+    if ! tg_check_proxy_nc "$server" "$port" 2; then
+        return 1
+    fi
+    
+    # Затем проверка через curl (более надёжная но медленная)
+    if tg_check_proxy_curl "$server" "$port" 5; then
+        return 0
+    fi
+    
+    return 1
+}
+
+# Поиск рабочего прокси из списка
+tg_find_working_proxy() {
+    print_info "Поиск рабочего прокси..."
+    
+    if [ ! -s "$TG_PROXY_CACHE_FILE" ]; then
+        tg_log "ERROR: Файл с прокси пуст или не найден"
         return 1
     fi
     
     local total_count working_count
-    total_count=$(wc -l < "$TG_PROXY_CACHE_FILE")
+    total_count=$(wc -l < "$TG_PROXY_CACHE_FILE" | tr -d ' ')
     working_count=0
     
-    print_info "Проверка прокси ($total_count штук)..."
-    
-    # Проверить каждый прокси
-    while IFS= read -r proxy; do
-        [ -z "$proxy" ] && continue
+    # Перебрать все прокси
+    while IFS=: read -r server port secret; do
+        [ -z "$server" ] && continue
         
-        if check_proxy_speed "$proxy"; then
-            working_count=$((working_count + 1))
-            print_success "Рабочий прокси найден: $proxy"
-            echo "$proxy"
+        working_count=$((working_count + 1))
+        printf "\r[%d/%d] Проверка %s:%s ... " "$working_count" "$total_count" "$server" "$port"
+        
+        if tg_verify_proxy "$server" "$port"; then
+            printf "\n"
+            print_success "Рабочий прокси найден: ${server}:${port}"
+            tg_log "INFO: Рабочий прокси: ${server}:${port}"
+            
+            # Вернуть первый рабочий (можно улучшить логику выбора лучшего)
+            echo "${server}:${port}"
             return 0
         fi
     done < "$TG_PROXY_CACHE_FILE"
     
-    print_error "Ни один прокси не работает"
+    printf "\n"
+    print_warning "Рабочие прокси не найдены"
+    tg_log "WARNING: Рабочие прокси не найдены"
     return 1
 }
 
-# Сохранить конфигурацию прокси
-# Параметры: $1 - server:port:secret
-save_proxy_config() {
-    local proxy=$1
-    local server port secret
+# ==============================================================================
+# АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ ПРОКСИ
+# ==============================================================================
+
+# Главная функция обновления прокси
+tg_update_proxy() {
+    tg_log "========== Начало обновления прокси =========="
     
-    if [ -z "$proxy" ]; then
-        print_error "Пустой прокси для сохранения"
+    # Шаг 1: Запарсить список прокси
+    if ! tg_parse_proxy_list; then
+        tg_log "ERROR: Не удалось получить список прокси"
         return 1
     fi
     
-    # Создать директорию если не существует
-    mkdir -p "$TG_PROXY_CONFIG_DIR" || {
-        print_error "Не удалось создать $TG_PROXY_CONFIG_DIR"
+    # Шаг 2: Найти рабочий прокси
+    local working_proxy
+    working_proxy=$(tg_find_working_proxy)
+    
+    if [ -z "$working_proxy" ]; then
+        tg_log "ERROR: Не удалось найти рабочий прокси"
         return 1
-    }
+    fi
     
-    # Разобрать прокси
-    server=$(echo "$proxy" | cut -d':' -f1)
-    port=$(echo "$proxy" | cut -d':' -f2)
-    secret=$(echo "$proxy" | cut -d':' -f3-)
+    # Разделить server и port
+    local proxy_server proxy_port
+    proxy_server=$(echo "$working_proxy" | cut -d':' -f1)
+    proxy_port=$(echo "$working_proxy" | cut -d':' -f2)
     
-    # Сохранить конфигурацию
-    cat > "$TG_PROXY_CONFIG_FILE" <<EOF
-# Конфигурация MTProto прокси для Telegram
-# Сгенерировано автоматически z2k
-# Дата: $(date '+%Y-%m-%d %H:%M:%S')
-
-ENABLED=1
-SERVER=$server
-PORT=$port
-SECRET=$secret
-LAST_UPDATE=$(date '+%Y-%m-%d %H:%M:%S')
-AUTO_UPDATE=1
-UPDATE_INTERVAL=3600
-EOF
+    # Шаг 3: Обновить конфиг Xray
+    if ! tg_update_upstream_proxy "$proxy_server" "$proxy_port"; then
+        tg_log "ERROR: Не удалось обновить конфиг"
+        return 1
+    fi
     
-    print_success "Конфигурация сохранена: $TG_PROXY_CONFIG_FILE"
+    # Шаг 4: Перезапустить Xray
+    print_info "Перезапуск Xray..."
+    if tg_control_xray restart; then
+        tg_log "INFO: Xray перезапущен"
+        print_success "Прокси обновлён и применён"
+    else
+        tg_log "ERROR: Не удалось перезапустить Xray"
+        print_error "Ошибка перезапуска Xray"
+        return 1
+    fi
+    
+    tg_log "========== Обновление прокси завершено =========="
     return 0
-}
-
-# Загрузить текущую конфигурацию
-load_proxy_config() {
-    if [ -f "$TG_PROXY_CONFIG_FILE" ]; then
-        . "$TG_PROXY_CONFIG_FILE"
-        return 0
-    else
-        return 1
-    fi
-}
-
-# Показать статус прокси
-show_proxy_status() {
-    print_header "Статус Telegram прокси"
-    
-    if load_proxy_config; then
-        if [ "$ENABLED" = "1" ]; then
-            print_success "Telegram прокси: ВКЛЮЧЕН"
-            printf "  Сервер: %s\\n" "$SERVER"
-            printf "  Порт: %s\\n" "$PORT"
-            printf "  Secret: %s\\n" "$SECRET"
-            printf "  Последнее обновление: %s\\n" "${LAST_UPDATE:-неизвестно}"
-            printf "  Автообновление: %s\\n" "$([ "$AUTO_UPDATE" = "1" ] && echo 'Включено' || echo 'Выключено')"
-            printf "  Интервал обновления: %s сек\\n" "${UPDATE_INTERVAL:-3600}"
-        else
-            print_warning "Telegram прокси: ВЫКЛЮЧЕН"
-        fi
-    else
-        print_info "Telegram прокси: НЕ НАСТРОЕН"
-        print_info "Используйте меню для настройки"
-    fi
-    
-    # Проверить наличие скрипта автообновления
-    if [ -x "$TG_PROXY_UPDATE_SCRIPT" ]; then
-        print_info "Скрипт автообновления: установлен"
-    else
-        print_warning "Скрипт автообновления: не установлен"
-    fi
 }
 
 # ==============================================================================
-# УСТАНОВКА ПРОКСИ
+# НАСТРОЙКА CRON ДЛЯ АВТООБНОВЛЕНИЯ
 # ==============================================================================
 
-# Установить необходимые пакеты для прокси
-install_proxy_packages() {
-    print_info "Установка пакетов для Telegram прокси..."
-    
-    local packages="iptables"
-    
-    for pkg in $packages; do
-        if opkg list-installed 2>/dev/null | grep -q "^${pkg} "; then
-            print_success "$pkg уже установлен"
-        else
-            print_info "Установка $pkg..."
-            if opkg install "$pkg" 2>/dev/null; then
-                print_success "$pkg установлен"
-            else
-                print_warning "Не удалось установить $pkg"
-            fi
-        fi
-    done
-    
-    return 0
-}
-
-# Создать скрипт обновления прокси
-create_update_script() {
-    print_info "Создание скрипта автообновления прокси..."
-    
-    # Создать директорию
-    mkdir -p "$TG_PROXY_SCRIPT_DIR" || {
-        print_error "Не удалось создать $TG_PROXY_SCRIPT_DIR"
-        return 1
-    }
-    
-    # Создать скрипт обновления
-    cat > "$TG_PROXY_UPDATE_SCRIPT" <<'SCRIPT_EOF'
-#!/bin/sh
-# update_proxy.sh - Автоматическое обновление MTProto прокси для Telegram
-# Запускается по расписанию через cron
-
-# Загрузить конфигурацию z2k
-CONFIG_DIR="/opt/etc/zapret2"
-ZAPRET2_DIR="/opt/zapret2"
-TG_PROXY_CONFIG_DIR="${CONFIG_DIR}/telegram_proxy"
-TG_PROXY_CACHE_FILE="${TG_PROXY_CONFIG_DIR}/proxy_cache.txt"
-TG_PROXY_CONFIG_FILE="${TG_PROXY_CONFIG_DIR}/proxy.conf"
-TG_PROXY_SOURCE_URL="https://storage.yandexcloud.net/ocean/mossad/tg.html"
-
-# Лог файл
-LOG_FILE="/tmp/tg_proxy_update.log"
-
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
-}
-
-log "Начало обновления прокси"
-
-# Загрузить текущий конфиг
-if [ -f "$TG_PROXY_CONFIG_FILE" ]; then
-    . "$TG_PROXY_CONFIG_FILE"
-else
-    log "Конфиг не найден, создаю новый"
-    ENABLED=0
-fi
-
-# Проверить нужно ли обновление
-if [ "$AUTO_UPDATE" != "1" ]; then
-    log "Автообновление выключено"
-    exit 0
-fi
-
-# Загрузить HTML со списком прокси
-TEMP_HTML="/tmp/tg_proxy_${$}.html"
-if curl -fsSL --connect-timeout 10 --max-time 30 "$TG_PROXY_SOURCE_URL" -o "$TEMP_HTML" 2>/dev/null; then
-    # Распарсить прокси (упрощённая версия)
-    grep -oE "server:[[:space:]]*'[^']*'" "$TEMP_HTML" | sed "s/server:[[:space:]]*'//; s/'$//" > /tmp/tg_servers.tmp
-    grep -oE "port:[[:space:]]*'[0-9]*'" "$TEMP_HTML" | sed "s/port:[[:space:]]*'//; s/'$//" > /tmp/tg_ports.tmp
-    grep -oE "secret:[[:space:]]*'[^']*'" "$TEMP_HTML" | sed "s/secret:[[:space:]]*'//; s/'$//" > /tmp/tg_secrets.tmp
-    
-    # Собрать прокси
-    paste -d':' /tmp/tg_servers.tmp /tmp/tg_ports.tmp /tmp/tg_secrets.tmp > "$TG_PROXY_CACHE_FILE"
-    
-    rm -f /tmp/tg_servers.tmp /tmp/tg_ports.tmp /tmp/tg_secrets.tmp "$TEMP_HTML"
-    
-    PROXY_COUNT=$(wc -l < "$TG_PROXY_CACHE_FILE")
-    log "Загружено прокси: $PROXY_COUNT"
-    
-    if [ "$PROXY_COUNT" -gt 0 ]; then
-        # Выбрать первый прокси (можно добавить проверку скорости)
-        NEW_PROXY=$(head -1 "$TG_PROXY_CACHE_FILE")
-        
-        SERVER=$(echo "$NEW_PROXY" | cut -d':' -f1)
-        PORT=$(echo "$NEW_PROXY" | cut -d':' -f2)
-        SECRET=$(echo "$NEW_PROXY" | cut -d':' -f3-)
-        
-        # Сохранить новый конфиг
-        cat > "$TG_PROXY_CONFIG_FILE" <<EOF
-# Конфигурация MTProto прокси для Telegram
-ENABLED=1
-SERVER=$SERVER
-PORT=$PORT
-SECRET=$SECRET
-LAST_UPDATE=$(date '+%Y-%m-%d %H:%M:%S')
-AUTO_UPDATE=1
-UPDATE_INTERVAL=3600
-EOF
-        
-        log "Прокси обновлён: $SERVER:$PORT"
-        
-        # Перезапустить iptables правила если прокси запущен
-        if [ "$ENABLED" = "1" ]; then
-            # Здесь можно вызвать функцию применения правил
-            log "Требуется перезапуск iptables правил"
-        fi
-    else
-        log "Ошибка: прокси не найдены"
+# Проверка наличия cron
+tg_check_cron() {
+    if [ -x "/opt/etc/init.d/S10cron" ]; then
+        return 0
+    elif tg_check_command crond; then
+        return 0
     fi
-else
-    log "Ошибка загрузки списка прокси"
-fi
-
-log "Обновление завершено"
-SCRIPT_EOF
-    
-    chmod +x "$TG_PROXY_UPDATE_SCRIPT"
-    print_success "Скрипт создан: $TG_PROXY_UPDATE_SCRIPT"
-    return 0
+    return 1
 }
 
-# Применить iptables правила для проксирования Telegram
-apply_iptables_rules() {
-    print_info "Применение iptables правил для Telegram..."
+# Установка cron если не установлен
+tg_install_cron() {
+    print_info "Установка cron..."
     
-    # Загрузить конфигурацию
-    if ! load_proxy_config; then
-        print_error "Конфигурация прокси не найдена"
-        return 1
-    fi
-    
-    if [ "$ENABLED" != "1" ]; then
-        print_info "Прокси выключен"
+    if tg_is_package_installed "cron" || tg_is_package_installed "crond"; then
+        print_success "cron уже установлен"
         return 0
     fi
     
-    # Проверить наличие iptables
-    if ! command -v iptables >/dev/null 2>&1; then
-        print_error "iptables не найден"
-        return 1
+    if opkg install cron; then
+        print_success "cron установлен"
+        return 0
     fi
     
-    # Создать цепочку для Telegram
-    iptables -N TG_PROXY 2>/dev/null || iptables -F TG_PROXY
-    
-    # Добавить правила для каждого домена Telegram
-    # Используем ipset для эффективности если доступен
-    if command -v ipset >/dev/null 2>&1; then
-        # Создать ipset для доменов Telegram
-        ipset create tg_domains hash:ip 2>/dev/null || ipset flush tg_domains
-        
-        # Разрешить трафик Telegram через прокси
-        # Примечание: это упрощённая схема, реальная требует настройки nfqws2 или аналога
-        for domain in $TG_DOMAINS; do
-            # Получить IP адреса домена
-            local ips
-            ips=$(nslookup "$domain" 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}')
-            for ip in $ips; do
-                [ -n "$ip" ] && ipset add tg_domains "$ip" 2>/dev/null
-            done
-        done
-        
-        # Перенаправить трафик к Telegram через прокси
-        iptables -A TG_PROXY -m set --match-set tg_domains dst -j REDIRECT --to-port "${PORT:-443}"
-        
-        print_success "Правила применены через ipset"
-    else
-        # Упрощённый режим без ipset
-        print_warning "ipset не доступен, применяю упрощённые правила"
-        
-        for domain in $TG_DOMAINS; do
-            local ips
-            ips=$(nslookup "$domain" 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}')
-            for ip in $ips; do
-                if [ -n "$ip" ]; then
-                    iptables -A TG_PROXY -d "$ip" -j REDIRECT --to-port "${PORT:-443}" 2>/dev/null
-                fi
-            done
-        done
-        
-        print_success "Правила применены (упрощённый режим)"
+    # Попробовать альтернативное имя пакета
+    if opkg install crond; then
+        print_success "crond установлен"
+        return 0
     fi
     
-    # Подключить цепочку к OUTPUT
-    iptables -I OUTPUT -j TG_PROXY 2>/dev/null
-    
-    print_success "iptables правила применены"
-    return 0
+    print_error "Не удалось установить cron"
+    return 1
 }
 
-# Удалить iptables правила
-remove_iptables_rules() {
-    print_info "Удаление iptables правил Telegram прокси..."
-    
-    # Удалить цепочку
-    iptables -D OUTPUT -j TG_PROXY 2>/dev/null
-    iptables -F TG_PROXY 2>/dev/null
-    iptables -X TG_PROXY 2>/dev/null
-    
-    # Удалить ipset если есть
-    if command -v ipset >/dev/null 2>&1; then
-        ipset destroy tg_domains 2>/dev/null
-    fi
-    
-    print_success "Правила удалены"
-}
-
-# Настроить cron для автообновления
-setup_cron_update() {
-    print_info "Настройка cron для автообновления..."
-    
-    local interval_hours=${1:-1}
-    local cron_line="0 */${interval_hours} * * * sh ${TG_PROXY_UPDATE_SCRIPT}"
-    local crontab_file="/opt/etc/crontab"
-    
-    # Проверить установлен ли cron
-    if ! command -v crontab >/dev/null 2>&1 && ! [ -f "$crontab_file" ]; then
-        print_info "Установка cron..."
-        opkg install cron 2>/dev/null || {
-            print_error "Не удалось установить cron"
+# Запуск cron
+tg_start_cron() {
+    if [ -x "/opt/etc/init.d/S10cron" ]; then
+        "/opt/etc/init.d/S10cron" restart
+        sleep 2
+        
+        # Проверить что процесс запущен
+        if pgrep -f "cron" >/dev/null 2>&1; then
+            print_success "cron запущен"
+            return 0
+        else
+            print_error "Не удалось запустить cron"
             return 1
-        }
+        fi
+    elif tg_check_command crond; then
+        crond
+        return $?
     fi
     
-    # Добавить задачу в crontab
-    if [ -f "$crontab_file" ]; then
-        # Удалить старые записи
-        grep -v "tg_proxy" "$crontab_file" > "${crontab_file}.tmp" 2>/dev/null || true
-        mv "${crontab_file}.tmp" "$crontab_file" 2>/dev/null || true
+    return 1
+}
+
+# Настройка задачи cron для автообновления
+tg_setup_cron_job() {
+    local interval_hours="${1:-$DEFAULT_PROXY_UPDATE_INTERVAL}"
+    
+    print_header "Настройка автообновления прокси"
+    
+    # Убедиться что cron установлен и запущен
+    if ! tg_check_cron; then
+        print_warning "cron не найден"
+        if ! tg_install_cron; then
+            print_error "Не удалось установить cron"
+            print_info "Автообновление будет недоступно"
+            return 1
+        fi
+    fi
+    
+    if ! tg_start_cron; then
+        print_error "Не удалось запустить cron"
+        return 1
+    fi
+    
+    # Создать задачу в crontab
+    local cron_expr="0 */${interval_hours} * * *"
+    local cron_task="$cron_expr $0 update_auto >> $TG_PROXY_LOG_FILE 2>&1"
+    
+    # Проверить есть ли уже задача
+    local existing_task
+    existing_task=$(crontab -l 2>/dev/null | grep "tg_proxy\|update_auto" || true)
+    
+    if [ -n "$existing_task" ]; then
+        print_info "Задача автообновления уже существует:"
+        echo "$existing_task"
+        printf "\nЗаменить на новую? [y/N]: "
+        read -r answer </dev/tty
         
-        # Добавить новую задачу
-        echo "$cron_line" >> "$crontab_file"
-        print_success "Cron настроен в $crontab_file"
-    elif command -v crontab >/dev/null 2>&1; then
-        (crontab -l 2>/dev/null | grep -v "tg_proxy"; echo "$cron_line") | crontab -
-        print_success "Cron настроен через crontab"
+        case "$answer" in
+            [Yy]*)
+                # Удалить старую задачу
+                crontab -l 2>/dev/null | grep -v "tg_proxy\|update_auto" > /tmp/crontab.tmp
+                crontab /tmp/crontab.tmp 2>/dev/null
+                rm -f /tmp/crontab.tmp
+                ;;
+            *)
+                print_info "Сохранена текущая задача"
+                return 0
+                ;;
+        esac
+    fi
+    
+    # Добавить новую задачу
+    (crontab -l 2>/dev/null; echo "$cron_task") | crontab -
+    
+    if crontab -l 2>/dev/null | grep -q "update_auto"; then
+        print_success "Автообновление настроено (каждые ${interval_hours} ч.)"
+        print_info "Задача: $cron_expr"
+        return 0
     else
-        print_error "Не удалось настроить cron"
+        print_error "Не удалось добавить задачу в crontab"
         return 1
     fi
-    
-    # Запустить cron демон
-    local cron_init="/opt/etc/init.d/S10cron"
-    if [ -x "$cron_init" ]; then
-        "$cron_init" restart >/dev/null 2>&1
-        print_info "Cron перезапущен"
-    fi
-    
-    return 0
 }
 
-# Полная установка и настройка прокси
-setup_telegram_proxy() {
-    print_header "Настройка Telegram прокси"
+# Отключение автообновления
+tg_disable_auto_update() {
+    print_info "Отключение автообновления..."
     
-    # Шаг 1: Загрузить список прокси
-    if ! load_proxy_list; then
-        print_error "Не удалось загрузить список прокси"
-        return 1
-    fi
+    # Удалить задачу из crontab
+    crontab -l 2>/dev/null | grep -v "tg_proxy\|update_auto" > /tmp/crontab.tmp
+    crontab /tmp/crontab.tmp 2>/dev/null
+    rm -f /tmp/crontab.tmp
     
-    # Шаг 2: Выбрать лучший прокси
-    local best_proxy
-    best_proxy=$(select_best_proxy)
-    
-    if [ -z "$best_proxy" ]; then
-        print_error "Не удалось выбрать рабочий прокси"
-        return 1
-    fi
-    
-    # Шаг 3: Сохранить конфигурацию
-    if ! save_proxy_config "$best_proxy"; then
-        return 1
-    fi
-    
-    # Шаг 4: Установить пакеты
-    install_proxy_packages
-    
-    # Шаг 5: Создать скрипт обновления
-    create_update_script
-    
-    # Шаг 6: Настроить cron
-    setup_cron_update 1
-    
-    # Шаг 7: Применить iptables правила
-    apply_iptables_rules
-    
-    print_separator
-    print_success "Telegram прокси настроен!"
-    printf "  Сервер: %s\\n" "$SERVER"
-    printf "  Порт: %s\\n" "$PORT"
-    print_info "Трафик Telegram будет идти через прокси"
-    print_info "Остальной трафик обрабатывается zapret2"
-    
-    return 0
-}
-
-# Отключить прокси
-disable_telegram_proxy() {
-    print_header "Отключение Telegram прокси"
-    
-    remove_iptables_rules
-    
-    # Обновить конфиг
-    if [ -f "$TG_PROXY_CONFIG_FILE" ]; then
-        sed -i 's/^ENABLED=.*/ENABLED=0/' "$TG_PROXY_CONFIG_FILE"
-        print_success "Прокси выключен"
-    fi
-    
-    return 0
-}
-
-# Включить прокси
-enable_telegram_proxy() {
-    print_header "Включение Telegram прокси"
-    
-    if [ ! -f "$TG_PROXY_CONFIG_FILE" ]; then
-        print_error "Конфигурация не найдена"
-        print_info "Сначала настройте прокси"
-        return 1
-    fi
-    
-    # Обновить конфиг
-    sed -i 's/^ENABLED=.*/ENABLED=1/' "$TG_PROXY_CONFIG_FILE"
-    
-    # Применить правила
-    apply_iptables_rules
-    
-    print_success "Прокси включён"
+    print_success "Автообновление отключено"
     return 0
 }
 
 # ==============================================================================
-# ИНТЕГРАЦИЯ С МЕНЮ
+# IPSET ДЛЯ МАРКИРОВКИ ТРАФИКА TELEGRAM
 # ==============================================================================
 
-# Функция для вызова из главного меню
+# Создание ipset для доменов Telegram
+tg_create_ipset() {
+    local set_name="telegram_domains"
+    
+    # Проверить наличие ipset
+    if ! tg_check_command ipset; then
+        print_warning "ipset не найден"
+        print_info "Установите: opkg install ipset"
+        return 1
+    fi
+    
+    # Удалить старый set если есть
+    ipset destroy "$set_name" 2>/dev/null
+    
+    # Создать новый hash:set доменов
+    if ipset create "$set_name" hash:ip maxelem 1024 timeout 3600; then
+        print_success "ipset '$set_name' создан"
+        
+        # TODO: Здесь можно добавить разрешение доменов и добавление в set
+        # Это требует интеграции с dnsmasq или другим DNS резолвером
+        
+        return 0
+    else
+        print_error "Не удалось создать ipset"
+        return 1
+    fi
+}
+
+# ==============================================================================
+# ИНФОРМАЦИЯ О ПРОКСИ ДЛЯ КЛИЕНТОВ
+# ==============================================================================
+
+# Показать информацию для подключения клиентов
+tg_show_client_info() {
+    print_header "Информация для подключения клиентов"
+    
+    # Получить локальный IP роутера
+    local router_ip
+    router_ip=$(ip addr show br0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+    
+    if [ -z "$router_ip" ]; then
+        router_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+    
+    if [ -z "$router_ip" ]; then
+        router_ip="IP_ВАШЕГО_РОУТЕРА"
+    fi
+    
+    # Получить секрет
+    local secret
+    secret=$(cat "$TG_PROXY_SECRET_FILE" 2>/dev/null)
+    
+    if [ -z "$secret" ]; then
+        secret="НЕТ_СЕКРЕТА"
+    fi
+    
+    cat << EOF
+
+Для подключения клиентов Telegram к прокси:
+
+1. Откройте ссылку на устройстве в локальной сети:
+   tg://proxy?server=${router_ip}&port=443&secret=${secret}
+
+2. Или создайте ссылку вручную:
+   tg://proxy?server=${router_ip}&port=443&secret=${secret}
+
+3. Нажмите на ссылку - Telegram предложит добавить прокси
+
+4. Подтвердите добавление и включите прокси
+
+Примечание:
+- Клиенты должны быть подключены к Wi-Fi роутера
+- Прокси работает только для Telegram
+- Весь остальной трафик идёт напрямую
+
+EOF
+    
+    # Сохранить ссылку в файл
+    local link_file="${CONFIG_DIR}/tg_proxy_link.txt"
+    echo "tg://proxy?server=${router_ip}&port=443&secret=${secret}" > "$link_file"
+    print_info "Ссылка сохранена в: $link_file"
+}
+
+# ==============================================================================
+# МЕНЮ УПРАВЛЕНИЯ
+# ==============================================================================
+
+# Главное меню модуля Telegram прокси
 menu_telegram_proxy() {
     while true; do
         clear_screen
-        print_header "Telegram MTProto Прокси"
+        print_header "Telegram прокси (MTProto via XKeen)"
         
-        show_proxy_status
+        # Показать текущий статус
+        printf "\\nСтатус:\\n"
         
-        cat <<'MENU'
+        # Проверка XKeen/Xray
+        if [ -x "$XKEEN_BIN" ] || [ -x "$XRAY_BIN" ]; then
+            print_success "Xray установлен"
+            
+            # Статус сервиса
+            if tg_check_xray_status >/dev/null 2>&1; then
+                print_success "Xray запущен"
+            else
+                print_warning "Xray остановлен"
+            fi
+            
+            # Проверка конфига
+            if [ -f "$XRAY_MTPROTO_CONFIG" ]; then
+                print_success "Конфигурация MTProto есть"
+                
+                # Показать текущий upstream
+                local current_upstream
+                current_upstream=$(grep -o '"proxy": "socks5://[^"]*"' "$XRAY_MTPROTO_CONFIG" 2>/dev/null | cut -d'"' -f4)
+                if [ -n "$current_upstream" ] && [ "$current_upstream" != "socks5://0.0.0.0:0" ]; then
+                    print_success "Upstream: $current_upstream"
+                else
+                    print_warning "Upstream не настроен"
+                fi
+            else
+                print_warning "Конфигурация MTProto отсутствует"
+            fi
+            
+            # Проверка автообновления
+            if crontab -l 2>/dev/null | grep -q "update_auto"; then
+                print_success "Автообновление включено"
+            else
+                print_warning "Автообновление отключено"
+            fi
+        else
+            print_warning "Xray не установлен"
+        fi
+        
+        cat << 'MENU'
 
-[1] Настроить прокси (автовыбор)
-[2] Включить прокси
-[3] Выключить прокси
-[4] Обновить прокси вручную
-[5] Настроить автообновление
-[B] Назад
+[1] Установить XKeen/Xray
+[2] Настроить MTProto прокси
+[3] Включить прокси (старт Xray)
+[4] Выключить прокси (стоп Xray)
+[5] Обновить прокси вручную
+[6] Настроить автообновление
+[7] Отключить автообновление
+[8] Информация для клиентов
+[9] Статус и логи
+[0] Назад
 
 MENU
         
-        printf "Выберите опцию: "
+        printf "Выберите опцию [0-9]: "
         read -r choice </dev/tty
         
         case "$choice" in
             1)
-                if confirm "Настроить Telegram прокси?" "Y"; then
-                    setup_telegram_proxy
-                fi
-                pause
-                ;;
-            2)
-                enable_telegram_proxy
-                pause
-                ;;
-            3)
-                disable_telegram_proxy
-                pause
-                ;;
-            4)
-                print_info "Обновление прокси..."
-                if load_proxy_list; then
-                    local new_proxy
-                    new_proxy=$(select_best_proxy)
-                    if [ -n "$new_proxy" ]; then
-                        save_proxy_config "$new_proxy"
-                        apply_iptables_rules
+                # Установка XKeen - полная автоматическая установка и настройка
+                print_info "Начинается полная автоматическая установка XKeen/Xray..."
+                print_info "Этот процесс установит все необходимые компоненты и настроит MTProto прокси"
+                
+                if tg_install_dependencies && \
+                   tg_install_xkeen && \
+                   tg_init_xkeen && \
+                   tg_create_mtproto_config; then
+                    print_success "XKeen установлен и настроен"
+                    print_info "Теперь будет выполнена первоначальная настройка прокси..."
+                    
+                    # Автоматически обновить прокси после установки
+                    if tg_update_proxy; then
+                        print_success "Прокси успешно настроен и активирован"
+                        print_info "Теперь можно настроить автообновление через опцию [6]"
+                    else
+                        print_warning "Прокси не удалось обновить автоматически"
+                        print_info "Попробуйте опцию [5] для ручного обновления"
                     fi
+                else
+                    print_error "Ошибка при установке XKeen"
                 fi
                 pause
                 ;;
-            5)
-                printf "Интервал обновления (часы) [1]: "
-                read -r hours </dev/tty
-                hours=${hours:-1}
-                setup_cron_update "$hours"
+            
+            2)
+                # Настройка MTProto - создание/пересоздание конфигурации
+                print_info "Создание конфигурации MTProto прокси..."
+                if tg_create_mtproto_config; then
+                    print_success "Конфигурация создана"
+                    print_info "Теперь будет выполнено обновление прокси..."
+                    
+                    # Автоматически обновить прокси после создания конфига
+                    if tg_update_proxy; then
+                        print_success "Прокси обновлён и применён"
+                    else
+                        print_warning "Не удалось обновить прокси автоматически"
+                        print_info "Попробуйте опцию [5] для ручного обновления"
+                    fi
+                else
+                    print_error "Ошибка создания конфигурации"
+                fi
                 pause
                 ;;
-            b|B)
+            
+            3)
+                # Включить прокси - запуск Xray с автоматической проверкой конфигурации
+                print_info "Проверка конфигурации перед запуском..."
+                
+                if [ ! -f "$XRAY_MTPROTO_CONFIG" ]; then
+                    print_warning "Конфигурация MTProto не найдена"
+                    print_info "Сначала выполните установку через опцию [1]"
+                    pause
+                    continue
+                fi
+                
+                if tg_control_xray start; then
+                    print_success "Прокси включён и работает"
+                    print_info "Трафик Telegram теперь идёт через MTProto прокси"
+                else
+                    print_error "Ошибка запуска Xray"
+                    print_info "Проверьте логи через опцию [9]"
+                fi
+                pause
+                ;;
+            
+            4)
+                # Выключить прокси
+                if tg_control_xray stop; then
+                    print_success "Прокси выключен"
+                else
+                    print_error "Ошибка остановки"
+                fi
+                pause
+                ;;
+            
+            5)
+                # Обновить вручную
+                print_info "Обновление прокси..."
+                if tg_update_proxy; then
+                    print_success "Прокси успешно обновлён"
+                else
+                    print_error "Ошибка обновления"
+                fi
+                pause
+                ;;
+            
+            6)
+                # Настроить автообновление
+                print_info "Интервал обновления (часы) [1]: "
+                read -r interval </dev/tty
+                interval="${interval:-1}"
+                
+                if tg_setup_cron_job "$interval"; then
+                    print_success "Автообновление настроено"
+                fi
+                pause
+                ;;
+            
+            7)
+                # Отключить автообновление
+                if tg_disable_auto_update; then
+                    print_success "Автообновление отключено"
+                fi
+                pause
+                ;;
+            
+            8)
+                # Информация для клиентов
+                tg_show_client_info
+                pause
+                ;;
+            
+            9)
+                # Статус и логи
+                print_header "Статус и логи"
+                
+                print_info "Статус Xray:"
+                tg_check_xray_status
+                
+                printf "\\n"
+                print_info "Последние 20 строк лога:"
+                if [ -f "$TG_PROXY_LOG_FILE" ]; then
+                    tail -20 "$TG_PROXY_LOG_FILE"
+                else
+                    print_info "Лог файл ещё не создан"
+                fi
+                
+                pause
+                ;;
+            
+            0)
                 return 0
                 ;;
+            
             *)
                 print_error "Неверный выбор"
                 pause
@@ -733,20 +1163,12 @@ MENU
     done
 }
 
-# Экспорт функций
-export -f parse_proxies_from_html 2>/dev/null || true
-export -f load_proxy_list 2>/dev/null || true
-export -f check_proxy_speed 2>/dev/null || true
-export -f select_best_proxy 2>/dev/null || true
-export -f save_proxy_config 2>/dev/null || true
-export -f load_proxy_config 2>/dev/null || true
-export -f show_proxy_status 2>/dev/null || true
-export -f install_proxy_packages 2>/dev/null || true
-export -f create_update_script 2>/dev/null || true
-export -f apply_iptables_rules 2>/dev/null || true
-export -f remove_iptables_rules 2>/dev/null || true
-export -f setup_cron_update 2>/dev/null || true
-export -f setup_telegram_proxy 2>/dev/null || true
-export -f disable_telegram_proxy 2>/dev/null || true
-export -f enable_telegram_proxy 2>/dev/null || true
+# Обработка вызова из командной строки (для cron)
+if [ -n "$1" ] && [ "$1" = "update_auto" ]; then
+    # Автоматическое обновление без интерактива
+    tg_update_proxy
+    exit $?
+fi
+
+# Экспорт функции меню для использования в главном меню z2k
 export -f menu_telegram_proxy 2>/dev/null || true
