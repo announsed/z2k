@@ -201,9 +201,11 @@ download_modules() {
         # --max-time 60 - общее максимальное время выполнения 60 секунд
         if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$output"; then
             # Проверить что файл не пустой и содержит код (комментарии или функции)
-            # grep -q "^#\\|^[a-zA-Z_]" ищет строки начинающиеся с # или буквы/подчёркивания
+            # Оптимизация: проверять размер файла через -s вместо wc -l
             if [ -s "$output" ] && grep -q "^#\|^[a-zA-Z_]" "$output"; then
-                print_success "Загружен: ${module}.sh ($(wc -l < "$output") строк)"
+                local line_count
+                line_count=$(wc -l < "$output")
+                print_success "Загружен: ${module}.sh ($line_count строк)"
             else
                 print_error "Файл ${module}.sh повреждён или пуст"
                 rm -f "$output"

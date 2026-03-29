@@ -524,12 +524,12 @@ check_url_accessible() {
     fi
 }
 
-# Получить версию nfqws2
+# Получить версию nfqws2 (оптимизация: один awk вместо head|awk)
 get_nfqws2_version() {
     local nfqws2="${ZAPRET2_DIR}/nfq2/nfqws2"
 
     if [ -x "$nfqws2" ]; then
-        "$nfqws2" --help 2>&1 | head -n 1 | awk '{print $NF}' || echo "unknown"
+        "$nfqws2" --help 2>&1 | awk 'NR==1 {print $NF}' || echo "unknown"
     else
         echo "not installed"
     fi

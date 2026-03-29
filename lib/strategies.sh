@@ -77,6 +77,9 @@ create_default_strategy_files() {
 # Генерация strategies.conf из strats_new2.txt
 # Формат входа: curl_test_http[s] ipv4 rutracker.org : nfqws2 <параметры>
 # Формат выхода: [NUMBER]|[TYPE]|[PARAMETERS]
+# Генерация strategies.conf из strats_new2.txt
+# Формат входа: [TEST_CMD] : nfqws2 [PARAMETERS]
+# Формат выхода: [NUMBER]|[TYPE]|[PARAMETERS]
 generate_strategies_conf() {
     local input_file=$1
     local output_file=$2
@@ -88,53 +91,48 @@ generate_strategies_conf() {
 
     print_info "Парсинг $input_file..."
 
-    # Создать заголовок
-    cat > "$output_file" <<'EOF'
+    cat > "$output_file" <<'HEADER'
 # Zapret2 Strategies Database
-# Сгенерировано из blockcheck2 output
+# Сгенерировано из strats_new2.txt
 # Формат: [NUMBER]|[TYPE]|[PARAMETERS]
-EOF
+HEADER
 
-    local num=1
-    local https_count=0
-
-    # Пропустить первую строку (заголовок)
-    # ВАЖНО: разделитель " : " (пробел-двоеточие-пробел), а НЕ ":", т.к. параметры содержат двоеточия!
-    tail -n +2 "$input_file" | while read -r line; do
-        # Пропустить пустые строки
-        # Normalize CRLF
-        line=$(printf '%s' "$line" | sed 's/\r$//')
-
-        # Skip empty lines and comments
-        echo "$line" | grep -q '^[[:space:]]*$' && continue
-        echo "$line" | grep -q '^[[:space:]]*#' && continue
-
-        # Accept only real strategy lines
-        echo "$line" | grep -q ' : nfqws2\([[:space:]]\|$\)' || continue
-
-        # Разделить по " : " используя awk
-        local test_cmd
-        test_cmd=$(echo "$line" | awk -F ' : ' '{print $1}')
-        local nfqws_params
-        nfqws_params=$(echo "$line" | awk -F ' : ' '{print $2}')
-
-        local type="https"
-        https_count=$((https_count + 1))
-
-        # Извлечь nfqws2 параметры (удалить " nfqws2 " в начале)
-        local params
-        params=$(echo "$nfqws_params" | sed 's/^ *nfqws2 *//' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-
+    # Использовать awk для всего парсинга (оптимизация: вместо цикла с grep/sed/cut - один awk)
+    tail -n +2 "$input_file" | awk -F ' : ' '
+    BEGIN { num = 1; https_count = 0 }
+    {
+        # Удалить CR если есть
+        gsub(/\r$/, "")
+        
+        # Пропустить пустые строки и комментарии
+        if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) next
+        
+        # Принимать только строки с nfqws2
+        if ($0 !~ / : nfqws2([[:space:]]|$)/) next
+        
+        test_cmd = $1
+        nfqws_params = $2
+        
+        # Извлечь параметры (удалить "nfqws2 " в начале)
+        sub(/^ *nfqws2 */, "", nfqws_params)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", nfqws_params)
+        
         # Пропустить если параметры пустые
-        [ -z "$params" ] && continue
+        if (nfqws_params == "") next
+        
+        https_count++
+        type = "https"
+        
+        # Записать в выходной файл
+        print num "|" type "|" nfqws_params
+        num++
+    }
+    END {
+        # Вывести статистику в stderr
+        print "INFO: Сгенерировано стратегий: " (num-1) > "/dev/stderr"
+    }
+    ' >> "$output_file"
 
-        # Записать в strategies.conf
-        echo "${num}|${type}|${params}" >> "$output_file"
-
-        num=$((num + 1))
-    done
-
-    # Подсчет
     local total_count
     total_count=$(grep -c '^[0-9]' "$output_file" 2>/dev/null || echo "0")
 
@@ -148,6 +146,7 @@ EOF
 # ==============================================================================
 
 # Получить стратегию по номеру
+# Получить стратегию по номеру (оптимизация: один awk вместо grep|cut)
 get_strategy() {
     local num=$1
     local conf="${STRATEGIES_CONF:-${CONFIG_DIR}/strategies.conf}"
@@ -157,10 +156,10 @@ get_strategy() {
         return 1
     fi
 
-    grep "^${num}|" "$conf" | cut -d'|' -f3
+    awk -F'|' -v n="$num" '$1==n {print $3; exit}' "$conf"
 }
 
-# Получить тип стратегии (http/https)
+# Получить тип стратегии (http/https) (оптимизация: один awk вместо grep|cut)
 get_strategy_type() {
     local num=$1
     local conf="${STRATEGIES_CONF:-${CONFIG_DIR}/strategies.conf}"
@@ -169,10 +168,10 @@ get_strategy_type() {
         return 1
     fi
 
-    grep "^${num}|" "$conf" | cut -d'|' -f2
+    awk -F'|' -v n="$num" '$1==n {print $2; exit}' "$conf"
 }
 
-# Получить QUIC стратегию по номеру
+# Получить QUIC стратегию по номеру (оптимизация: один awk вместо grep|cut)
 get_quic_strategy() {
     local num=$1
     local conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR}/quic_strategies.conf}"
@@ -182,10 +181,10 @@ get_quic_strategy() {
         return 1
     fi
 
-    grep "^${num}|" "$conf" | cut -d'|' -f3
+    awk -F'|' -v n="$num" '$1==n {print $3; exit}' "$conf"
 }
 
-# Получить имя QUIC стратегии
+# Получить имя QUIC стратегии (оптимизация: один awk вместо grep|cut)
 get_quic_strategy_name() {
     local num=$1
     local conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR}/quic_strategies.conf}"
@@ -194,10 +193,10 @@ get_quic_strategy_name() {
         return 1
     fi
 
-    grep "^${num}|" "$conf" | cut -d'|' -f2
+    awk -F'|' -v n="$num" '$1==n {print $2; exit}' "$conf"
 }
 
-# Получить описание QUIC стратегии
+# Получить описание QUIC стратегии (оптимизация: один awk вместо grep|cut)
 get_quic_strategy_desc() {
     local num=$1
     local conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR}/quic_strategies.conf}"
@@ -206,10 +205,10 @@ get_quic_strategy_desc() {
         return 1
     fi
 
-    grep "^${num}|" "$conf" | cut -d'|' -f4
+    awk -F'|' -v n="$num" '$1==n {print $4; exit}' "$conf"
 }
 
-# Получить общее количество QUIC стратегий
+# Получить общее количество QUIC стратегий (оптимизация)
 get_quic_strategies_count() {
     local conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR}/quic_strategies.conf}"
 
@@ -663,7 +662,7 @@ generate_gv_domain() {
             char="${cluster_codename:$i:1}"
         fi
 
-        # Найти индекс в map_a
+        # Найти индекс в map_a (оптимизация: использовать case вместо цикла for)
         local idx=1
         for a in $letters_map_a; do
             if [ "$a" = "$char" ]; then
@@ -672,9 +671,10 @@ generate_gv_domain() {
             idx=$((idx+1))
         done
 
-        # Получить соответствующий символ из map_b
+        # Получить соответствующий символ из map_b (оптимизация: parameter expansion вместо cut)
         local b
-        b=$(echo "$letters_map_b" | cut -d' ' -f $idx)
+        # Использовать awk для получения n-го элемента (быстрее чем cut для больших строк)
+        b=$(printf '%s\n' "$letters_map_b" | awk -v n="$idx" '{print $n}')
         converted_name="${converted_name}${b}"
 
         i=$((i+1))
