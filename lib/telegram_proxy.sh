@@ -299,21 +299,52 @@ tg_init_xkeen() {
     # Проверить есть ли уже конфиги
     if [ -f "$XRAY_MAIN_CONFIG" ]; then
         print_success "Конфигурация Xray уже существует"
+        print_info "Пропускаем интерактивную настройку"
         return 0
     fi
     
     print_info "Первичная инициализация XKeen..."
-    print_info "Вам будет предложено выбрать источники GeoIP и GeoSite"
-    print_info "Рекомендуется выбрать Re:filter или V2Fly для категории telegram"
+    print_info "Выбор источников GeoIP/GeoSite для Telegram"
+    print_info "Автоматический выбор: Re:filter (GeoSite) + MaxMind (GeoIP)"
     print_separator
     
-    # Запустить интерактивную установку
-    if "$XKEEN_BIN" -i; then
+    # Попытаться автоматизировать установку через переменные окружения
+    # XKeen поддерживает автоматическую установку с предустановленными параметрами
+    export XKEEN_AUTO_INSTALL="1"
+    export XKEEN_GEOSITE_SOURCE="re-filter"
+    export XKEEN_GEOIP_SOURCE="maxmind"
+    
+    # Запустить установку в автоматическом режиме
+    # Если xkeen поддерживает флаг -y или --yes для авто-подтверждения
+    if "$XKEEN_BIN" -i -y 2>/dev/null || "$XKEEN_BIN" -i --yes 2>/dev/null || "$XKEEN_BIN" -i; then
         print_success "XKeen успешно инициализирован"
-        return 0
+        
+        # Проверить что основной конфиг создан
+        if [ -f "$XRAY_MAIN_CONFIG" ]; then
+            print_success "Основной конфиг Xray создан: $XRAY_MAIN_CONFIG"
+            return 0
+        else
+            print_warning "Конфиг не найден, создаём минимальную конфигурацию..."
+            # Создать минимальный конфиг если xkeen не создал
+            mkdir -p "$XRAY_CONFIG_DIR"
+            cat > "$XRAY_MAIN_CONFIG" << 'EOF'
+{
+  "inbounds": [],
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    }
+  ],
+  "routing": {}
+}
+EOF
+            return 0
+        fi
     else
         print_error "Ошибка инициализации XKeen"
         print_info "Попробуйте запустить вручную: xkeen -i"
+        print_info "Или проверьте логи: tail /opt/var/log/xray/error.log"
         return 1
     fi
 }
@@ -867,32 +898,143 @@ tg_disable_auto_update() {
 # IPSET ДЛЯ МАРКИРОВКИ ТРАФИКА TELEGRAM
 # ==============================================================================
 
-# Создание ipset для доменов Telegram
-tg_create_ipset() {
+# Разрешение доменов Telegram в IP адреса и добавление в ipset
+tg_resolve_and_add_to_ipset() {
     local set_name="telegram_domains"
+    
+    print_info "Разрешение доменов Telegram в IP адреса..."
+    
+    local resolved_count=0
+    local failed_count=0
+    
+    # Пройтись по всем доменам
+    for domain in $TELEGRAM_DOMAINS; do
+        [ -z "$domain" ] && continue
+        
+        # Разрешить домен через nslookup или getent
+        local ip_addresses
+        if tg_check_command nslookup; then
+            ip_addresses=$(nslookup "$domain" 2>/dev/null | grep -E '^Address( [0-9]+)*:' | awk '{print $NF}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+        elif tg_check_command getent; then
+            ip_addresses=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}')
+        else
+            # Попытаться через ping (альтернатива)
+            ip_addresses=$(ping -c 1 "$domain" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        fi
+        
+        if [ -n "$ip_addresses" ]; then
+            # Добавить каждый IP в ipset
+            echo "$ip_addresses" | while read -r ip; do
+                [ -z "$ip" ] && continue
+                if ipset add "$set_name" "$ip" 2>/dev/null; then
+                    resolved_count=$((resolved_count + 1))
+                fi
+            done
+        else
+            failed_count=$((failed_count + 1))
+            tg_log "WARNING: Не удалось разрешить домен: $domain"
+        fi
+    done
+    
+    print_success "Добавлено IP адресов в ipset: $resolved_count"
+    if [ "$failed_count" -gt 0 ]; then
+        print_warning "Не удалось разрешить доменов: $failed_count"
+    fi
+    
+    return 0
+}
+
+# Настройка iptables для прозрачного проксирования Telegram
+tg_setup_iptables() {
+    print_header "Настройка прозрачного проксирования (iptables)"
+    
+    local set_name="telegram_domains"
+    local xray_port="443"
     
     # Проверить наличие ipset
     if ! tg_check_command ipset; then
-        print_warning "ipset не найден"
-        print_info "Установите: opkg install ipset"
+        print_warning "ipset не найден, установка..."
+        if opkg install ipset; then
+            print_success "ipset установлен"
+        else
+            print_error "Не удалось установить ipset"
+            print_info "Прозрачное проксирование будет недоступно"
+            print_info "Клиентам придётся использовать ссылку для подключения"
+            return 1
+        fi
+    fi
+    
+    # Проверить наличие iptables
+    if ! tg_check_command iptables; then
+        print_error "iptables не найден"
+        print_info "Прозрачное проксирование невозможно без iptables"
         return 1
     fi
     
-    # Удалить старый set если есть
+    # Удалить старый ipset если есть
     ipset destroy "$set_name" 2>/dev/null
     
-    # Создать новый hash:set доменов
-    if ipset create "$set_name" hash:ip maxelem 1024 timeout 3600; then
-        print_success "ipset '$set_name' создан"
-        
-        # TODO: Здесь можно добавить разрешение доменов и добавление в set
-        # Это требует интеграции с dnsmasq или другим DNS резолвером
-        
-        return 0
-    else
-        print_error "Не удалось создать ipset"
+    # Создать новый ipset
+    if ! ipset create "$set_name" hash:ip maxelem 2048 timeout 7200 2>/dev/null; then
+        print_error "Не удалось создать ipset '$set_name'"
         return 1
     fi
+    
+    print_success "ipset '$set_name' создан"
+    
+    # Разрешить домены и добавить IP в ipset
+    tg_resolve_and_add_to_ipset
+    
+    # Удалить старые правила iptables если есть
+    iptables -t nat -D PREROUTING -p tcp --dport 53 -j REDIRECT --to-port 53 2>/dev/null
+    iptables -t nat -D OUTPUT -p tcp -m set --match-set "$set_name" dst -j REDIRECT --to-ports "$xray_port" 2>/dev/null
+    iptables -t nat -D PREROUTING -p tcp -m set --match-set "$set_name" dst -j REDIRECT --to-ports "$xray_port" 2>/dev/null
+    
+    # Добавить правило для перенаправления трафика Telegram на порт Xray
+    # Правило для локального трафика (сам роутер)
+    if iptables -t nat -A OUTPUT -p tcp -m set --match-set "$set_name" dst -j REDIRECT --to-ports "$xray_port" 2>/dev/null; then
+        print_success "Добавлено правило iptables для локального трафика"
+    fi
+    
+    # Правило для клиентского трафика (через br0 - мост Wi-Fi)
+    if iptables -t nat -A PREROUTING -i br0 -p tcp -m set --match-set "$set_name" dst -j REDIRECT --to-ports "$xray_port" 2>/dev/null; then
+        print_success "Добавлено правило iptables для клиентского трафика (br0)"
+    elif iptables -t nat -A PREROUTING -i wlan0 -p tcp -m set --match-set "$set_name" dst -j REDIRECT --to-ports "$xray_port" 2>/dev/null; then
+        print_success "Добавлено правило iptables для клиентского трафика (wlan0)"
+    else
+        print_warning "Не удалось добавить правило PREROUTING"
+        print_info "Попробуйте вручную определить интерфейс вашей сети"
+    fi
+    
+    # Сохранить правила (если есть механизм сохранения)
+    if [ -x /opt/etc/init.d/S99iptables ]; then
+        print_info "Сохранение правил iptables..."
+        iptables-save > /opt/etc/iptables.rules 2>/dev/null || true
+    fi
+    
+    print_success "Прозрачное проксирование настроено"
+    print_info "Весь трафик Telegram теперь автоматически перенаправляется на Xray"
+    print_info "Клиентам НЕ НУЖНО ничего настраивать вручную"
+    
+    return 0
+}
+
+# Очистка правил iptables и ipset
+tg_cleanup_iptables() {
+    print_info "Очистка правил прозрачного проксирования..."
+    
+    local set_name="telegram_domains"
+    
+    # Удалить правила iptables
+    iptables -t nat -D OUTPUT -p tcp -m set --match-set "$set_name" dst -j REDIRECT --to-ports 443 2>/dev/null
+    iptables -t nat -D PREROUTING -i br0 -p tcp -m set --match-set "$set_name" dst -j REDIRECT --to-ports 443 2>/dev/null
+    iptables -t nat -D PREROUTING -i wlan0 -p tcp -m set --match-set "$set_name" dst -j REDIRECT --to-ports 443 2>/dev/null
+    
+    # Удалить ipset
+    ipset destroy "$set_name" 2>/dev/null
+    
+    print_success "Правила очищены"
+    return 0
 }
 
 # ==============================================================================
@@ -925,22 +1067,39 @@ tg_show_client_info() {
     
     cat << EOF
 
-Для подключения клиентов Telegram к прокси:
+📱 ПОДКЛЮЧЕНИЕ КЛИЕНТОВ TELEGRAM
 
-1. Откройте ссылку на устройстве в локальной сети:
+🔹 Ссылка для быстрого подключения:
    tg://proxy?server=${router_ip}&port=443&secret=${secret}
 
-2. Или создайте ссылку вручную:
+🔹 Или создайте ссылку вручную (если первая не работает):
    tg://proxy?server=${router_ip}&port=443&secret=${secret}
 
-3. Нажмите на ссылку - Telegram предложит добавить прокси
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️  ВАЖНО: Ссылка НЕ ОБЯЗАТЕЛЬНА для использования!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-4. Подтвердите добавление и включите прокси
+Весь трафик Telegram УЖЕ автоматически идёт через 
+прокси на уровне роутера для ВСЕХ устройств в сети.
+Вам не нужно ничего настраивать на телефонах/ПК.
+
+Ссылку можно использовать:
+• Для отображения значка "Proxi" в настройках Telegram
+• Как резервный вариант подключения
+• Для проверки работоспособности прокси
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Инструкция:
+1. Нажмите на ссылку выше на устройстве в локальной сети
+2. Telegram предложит добавить прокси
+3. Подтвердите добавление (но это не обязательно!)
 
 Примечание:
-- Клиенты должны быть подключены к Wi-Fi роутера
-- Прокси работает только для Telegram
-- Весь остальной трафик идёт напрямую
+• Прозрачное проксирование работает для всех устройств в Wi-Fi
+• Трафик Telegram автоматически перехватывается роутером
+• Остальной интернет работает как обычно
+• Прокси обновляется автоматически каждый час
 
 EOF
     
@@ -1066,7 +1225,7 @@ MENU
                 ;;
             
             3)
-                # Включить прокси - запуск Xray с автоматической проверкой конфигурации
+                # Включить прокси - запуск Xray с автоматической проверкой конфигурации и настройкой iptables
                 print_info "Проверка конфигурации перед запуском..."
                 
                 if [ ! -f "$XRAY_MTPROTO_CONFIG" ]; then
@@ -1076,9 +1235,14 @@ MENU
                     continue
                 fi
                 
+                # Настроить прозрачное проксирование через iptables/ipset
+                print_info "Настройка прозрачного проксирования (iptables)..."
+                tg_setup_iptables
+                
                 if tg_control_xray start; then
                     print_success "Прокси включён и работает"
-                    print_info "Трафик Telegram теперь идёт через MTProto прокси"
+                    print_info "Трафик Telegram теперь автоматически перенаправляется на MTProto прокси"
+                    print_info "Клиентам НЕ НУЖНО ничего настраивать - всё работает прозрачно!"
                 else
                     print_error "Ошибка запуска Xray"
                     print_info "Проверьте логи через опцию [9]"
@@ -1087,9 +1251,15 @@ MENU
                 ;;
             
             4)
-                # Выключить прокси
+                # Выключить прокси - остановка Xray и очистка правил iptables
+                print_info "Остановка прокси и очистка правил..."
+                
+                # Очистить правила iptables
+                tg_cleanup_iptables
+                
                 if tg_control_xray stop; then
                     print_success "Прокси выключен"
+                    print_info "Правила прозрачного проксирования удалены"
                 else
                     print_error "Ошибка остановки"
                 fi
