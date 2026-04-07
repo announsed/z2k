@@ -593,20 +593,7 @@ tg_parse_proxy_list() {
     proxy_lines=$(printf '%s\n' "$html_content" | grep -oE 'tg://proxy\?[^"'\'<>[:space:]]+')
     
     if [ -n "$proxy_lines" ]; then
-        printf '%s\n' "$proxy_lines" | awk 'BEGIN { FS="[?&]" }
-        {
-            server=""; port=""; secret=""
-            for (i=2; i<=NF; i++) {
-                split($i, kv, "=")
-                if (kv[1] == "server") server = kv[2]
-                else if (kv[1] == "port") port = kv[2]
-                else if (kv[1] == "secret") secret = kv[2]
-            }
-            if (server != "" && port != "") {
-                if (secret == "") secret = "none"
-                print server":"port":"secret
-            }
-        }' >> "$TG_PROXY_CACHE_FILE"
+        printf '%s\n' "$proxy_lines" | awk 'BEGIN{FS="[?&]"}{server="";port="";secret="";for(i=2;i<=NF;i++){split($i,kv,"=");if(kv[1]=="server")server=kv[2];else if(kv[1]=="port")port=kv[2];else if(kv[1]=="secret")secret=kv[2]};if(server!=""&&port!=""){if(secret=="")secret="none";print server":"port":"secret}}' >> "$TG_PROXY_CACHE_FILE"
     fi
     
     local count
