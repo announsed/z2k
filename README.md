@@ -600,7 +600,7 @@ tail -50 /opt/var/log/tg_proxy.log
 | **TON** | `UQA6Y6Mf1Qge2dVSl3_vSqb29SKrhI8VgJtoRBjgp08oB8QY` |
 | **USDT (ERC20)** | `0xA1D6d7d339f05C1560ecAF0c5CB8c4dc80Dc46A9` |
 
-###其他方式
+### Другие способы
 
 - 🌟 **Звезда на GitHub** — [necronicle/z2k](https://github.com/necronicle/z2k)
 - 📢 **Расскажите друзьям** — поделитесь ссылкой в соцсетях
