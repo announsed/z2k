@@ -5,16 +5,16 @@
 # АРХИТЕКТУРА РЕШЕНИЯ:
 # ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐     ┌──────────────┐
 # │  Клиенты Wi-Fi  │────▶│ Keenetic (Xray) │────▶│ MTProto Upstream │────▶│  Telegram    │
-# │  (без настройки)│     │ порт 443      │     │ (из списка)     │     │  серверы     │
+# │  (без настройки)│     │ порт 443      │     │ (из mtproto.ru) │     │  серверы     │
 # └─────────────────┘     └──────────────┘     └─────────────────┘     └──────────────┘
 #
-# Xray выступает в двух ролях:
-# 1. Сервер MTProto - принимает подключения от клиентов Telegram на порту 443 (прозрачно)
-# 2. Клиент MTProto - подключается к выбранному внешнему прокси (upstream) и передаёт трафик
+# Xray выступает в роли прозрачного прокси:
+# 1. Сервер MTProto - принимает подключения от клиентов Telegram на порту 443 (прозрачно через iptables)
+# 2. Клиент MTProto - подключается к выбранному внешнему MTProxy серверу и передаёт трафик
 #
 # Скрипт автоматически:
-# - Парсит список прокси с https://storage.yandexcloud.net/ocean/mossad/tg.html
-# - Проверяет скорость и работоспособность каждого прокси
+# - Парсит список прокси с https://mtproto.ru/personal.php (официальный источник)
+# - Проверяет работоспособность прокси
 # - Выбирает лучший и обновляет конфигурацию Xray
 # - Перезапускает Xray для применения изменений
 # - Запускается по расписанию через cron (каждый час по умолчанию)
@@ -23,8 +23,8 @@
 # КОНСТАНТЫ И НАСТРОЙКИ
 # ==============================================================================
 
-# URL источника MTProto прокси
-TG_PROXY_SOURCE_URL="https://storage.yandexcloud.net/ocean/mossad/tg.html"
+# URL источника MTProto прокси (официальный источник с реальными серверами)
+TG_PROXY_SOURCE_URL="https://mtproto.ru/personal.php"
 
 # Пути установки XKeen/Xray
 XKEEN_BIN="/opt/sbin/xkeen"
@@ -477,13 +477,32 @@ tg_create_mtproto_config() {
     print_info "Секрет MTProto: $secret"
     print_info "(сохранён в $TG_PROXY_SECRET_FILE)"
     
-    # Создать конфиг MTProto
+    # Создать конфиг MTProto для Xray
+    # ВАЖНО: Xray работает как SOCKS5-прокси для клиентов и подключается к MTProto upstream
+    # Inbound: SOCKS5 на порту 1080 (локально) + прозрачный режим через tproxy/redirect
+    # Outbound: mtproto-obfuscated для подключения к внешним MTProxy серверам
     cat > "$XRAY_MTPROTO_CONFIG" << EOF
 {
   "inbounds": [
     {
       "tag": "telegram-in",
-      "port": 443,
+      "port": 1080,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true,
+        "ip": "127.0.0.1",
+        "clients": []
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "telegram-out-upstream",
       "protocol": "mtproto",
       "settings": {
         "users": [
@@ -492,25 +511,15 @@ tg_create_mtproto_config() {
           }
         ]
       }
-    }
-  ],
-  "outbounds": [
-    {
-      "tag": "telegram-out-direct",
-      "protocol": "freedom"
     },
     {
-      "tag": "telegram-out-upstream",
-      "protocol": "mtproto",
-      "settings": {},
-      "streamSettings": {
-        "sockopt": {
-          "proxy": "socks5://0.0.0.0:0"
-        }
-      }
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {}
     }
   ],
   "routing": {
+    "domainStrategy": "AsIs",
     "rules": [
       {
         "type": "field",
@@ -532,42 +541,92 @@ EOF
 }
 
 # Обновление upstream прокси в конфиге
+# Для MTProto в Xray нужно обновить сервер и порт в outbound настройках
 tg_update_upstream_proxy() {
     local server="$1"
     local port="$2"
-    
+
     if [ -z "$server" ] || [ -z "$port" ]; then
         tg_log "ERROR: Не указаны server или port"
         return 1
     fi
-    
+
     if [ ! -f "$XRAY_MTPROTO_CONFIG" ]; then
         tg_log "ERROR: Конфиг MTProto не найден: $XRAY_MTPROTO_CONFIG"
         return 1
     fi
-    
-    # Обновить строку proxy в конфиге
-    local old_proxy_pattern='"proxy": "socks5://[^"]*"'
-    local new_proxy="\"proxy\": \"socks5://${server}:${port}\""
-    
-    # Использовать sed для замены
-    if sed -i "s|${old_proxy_pattern}|${new_proxy}|" "$XRAY_MTPROTO_CONFIG" 2>/dev/null; then
+
+    # Получить секрет из файла
+    local secret
+    secret=$(cat "$TG_PROXY_SECRET_FILE" 2>/dev/null)
+
+    if [ -z "$secret" ]; then
+        tg_log "ERROR: Не удалось получить секрет MTProto"
+        return 1
+    fi
+
+    # Пересоздать конфиг с новым сервером
+    # Это надёжнее чем sed замена сложной JSON структуры
+    cat > "$XRAY_MTPROTO_CONFIG" << EOF
+{
+  "inbounds": [
+    {
+      "tag": "telegram-in",
+      "port": 1080,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true,
+        "ip": "127.0.0.1",
+        "clients": []
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "telegram-out-upstream",
+      "protocol": "mtproto",
+      "settings": {
+        "users": [
+          {
+            "secret": "${secret}"
+          }
+        ],
+        "server": "${server}",
+        "port": ${port}
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {}
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["telegram-in"],
+        "outboundTag": "telegram-out-upstream"
+      }
+    ]
+  }
+}
+EOF
+
+    if [ -f "$XRAY_MTPROTO_CONFIG" ]; then
         tg_log "INFO: Upstream обновлён: ${server}:${port}"
         return 0
     else
-        # Альтернативный способ замены (если sed -i не работает)
-        local temp_file="/tmp/mtproto_config.tmp"
-        if sed "s|${old_proxy_pattern}|${new_proxy}|" "$XRAY_MTPROTO_CONFIG" > "$temp_file" 2>/dev/null; then
-            mv "$temp_file" "$XRAY_MTPROTO_CONFIG"
-            tg_log "INFO: Upstream обновлён: ${server}:${port}"
-            return 0
-        else
-            tg_log "ERROR: Не удалось обновить конфиг"
-            return 1
-        fi
+        tg_log "ERROR: Не удалось обновить конфиг"
+        return 1
     fi
 }
-
 # ==============================================================================
 # ПАРСИНГ И ПРОВЕРКА ПРОКСИ
 # ==============================================================================
@@ -588,9 +647,10 @@ tg_parse_proxy_list() {
     # Очистить кэш файл
     > "$TG_PROXY_CACHE_FILE"
     
-    # Извлечь ссылки tg://proxy?... и распарсить одним awk (оптимизация: вместо 9 команд на строку - 1 awk)
+    # Извлечь ссылки tg://proxy?... с полным секретом (mtproto.ru выдаёт одну ссылку)
+    # Формат: tg://proxy?server=ne.4.mtproto.ru&port=443&secret=ee21112222333344445555666677778888...
     local proxy_lines
-    proxy_lines=$(printf '%s\n' "$html_content" | grep -oE 'tg://proxy\?[^"'\'<>[:space:]]+')
+    proxy_lines=$(printf '%s\n' "$html_content" | grep -oE 'tg://proxy\?server=[^&]+&port=[0-9]+&secret=[^"<>'\''[:space:]]+')
     
     if [ -n "$proxy_lines" ]; then
         printf '%s\n' "$proxy_lines" | awk 'BEGIN{FS="[?&]"}{server="";port="";secret="";for(i=2;i<=NF;i++){split($i,kv,"=");if(kv[1]=="server")server=kv[2];else if(kv[1]=="port")port=kv[2];else if(kv[1]=="secret")secret=kv[2]};if(server!=""&&port!=""){if(secret=="")secret="none";print server":"port":"secret}}' >> "$TG_PROXY_CACHE_FILE"
@@ -1353,5 +1413,4 @@ if [ -n "$1" ] && [ "$1" = "update_auto" ]; then
     exit $?
 fi
 
-# Экспорт функции меню для использования в главном меню z2k
-export -f menu_telegram_proxy 2>/dev/null || true
+# Функция меню экспортируется через вызов в main menu, export -f не работает в /bin/sh
